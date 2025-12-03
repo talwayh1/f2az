@@ -2,6 +2,7 @@ package com.tikhub.videoparser.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.tikhub.videoparser.data.model.ParsedMedia
 import com.tikhub.videoparser.data.model.ParseResult
 import com.tikhub.videoparser.data.repository.VideoParserRepository
 import com.tikhub.videoparser.download.DownloadManager
@@ -117,19 +118,17 @@ class MainViewModel @Inject constructor(
                         currentPlatform = Platform.detect(input)
                         Timber.d("识别平台: $currentPlatform")
 
-                        // 如果有视频，获取真实文件大小
-                        val updatedResult = if (result.video != null && !result.video.playUrl.isNullOrEmpty()) {
+                        // 如果是视频，获取真实文件大小
+                        val updatedResult = if (result is ParsedMedia.Video && result.videoUrl.isNotEmpty()) {
                             Timber.d("检测到视频，开始获取文件大小...")
                             val fileSize = downloadManager.getFileSize(
-                                url = result.video.playUrl,
+                                url = result.videoUrl,
                                 platform = currentPlatform
                             )
                             Timber.i("获取到视频文件大小: $fileSize 字节")
 
-                            // 更新 video 的 size 字段
-                            result.copy(
-                                video = result.video.copy(size = fileSize)
-                            )
+                            // 更新 video 的 fileSize 字段
+                            result.copy(fileSize = fileSize)
                         } else {
                             result
                         }

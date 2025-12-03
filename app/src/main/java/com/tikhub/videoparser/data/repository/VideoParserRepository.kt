@@ -385,7 +385,9 @@ class VideoParserRepository @Inject constructor(
             val response = apiService.fetchXiguaVideo(url, "Bearer ${ApiConstants.API_KEY}")
 
             if (response.code == 200 && response.data != null) {
-                val media = MediaMapper.mapXigua(response.data)
+                // 将 JsonObject 转换为 XiguaVideoData
+                val xiguaData = gson.fromJson(response.data, XiguaVideoData::class.java)
+                val media = MediaMapper.mapXigua(xiguaData)
                 Timber.i("✅ 西瓜视频解析成功: ${media::class.simpleName}")
                 Result.success(media)
             } else {
@@ -411,7 +413,9 @@ class VideoParserRepository @Inject constructor(
             val response = apiService.fetchInstagramPost(url, "Bearer ${ApiConstants.API_KEY}")
 
             if (response.code == 200 && response.data != null) {
-                val media = MediaMapper.mapInstagram(response.data)
+                // 将 JsonObject 转换为 InstagramPostData
+                val instagramData = gson.fromJson(response.data, InstagramPostData::class.java)
+                val media = MediaMapper.mapInstagram(instagramData)
                 Timber.i("✅ Instagram 解析成功: ${media::class.simpleName}")
                 Result.success(media)
             } else {
@@ -442,7 +446,9 @@ class VideoParserRepository @Inject constructor(
             val response = apiService.fetchYouTubeVideo(videoId, "Bearer ${ApiConstants.API_KEY}")
 
             if (response.code == 200 && response.data != null) {
-                val media = MediaMapper.mapYouTube(response.data)
+                // 将 JsonObject 转换为 YouTubeVideoData
+                val youtubeData = gson.fromJson(response.data, YouTubeVideoData::class.java)
+                val media = MediaMapper.mapYouTube(youtubeData)
                 Timber.i("✅ YouTube 解析成功: ${media::class.simpleName}")
                 Result.success(media)
             } else {

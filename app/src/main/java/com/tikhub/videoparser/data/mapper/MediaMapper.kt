@@ -253,35 +253,33 @@ object MediaMapper {
      * 转换快手数据
      */
     fun mapKuaishou(data: KuaishouVideoData): ParsedMedia {
-        val videoData = data.data
-            ?: throw IllegalStateException("快手数据缺少 data 字段")
+        val photo = data.photo
 
         val stats = StatsInfo(
-            likeCount = videoData.likeCount ?: 0,
-            commentCount = videoData.commentCount ?: 0,
-            shareCount = videoData.forwardCount ?: 0,
+            likeCount = photo.likeCount,
+            commentCount = photo.commentCount,
+            shareCount = photo.shareCount,
             collectCount = 0,
-            playCount = videoData.viewCount ?: 0
+            playCount = photo.viewCount
         )
 
-        val playUrl = videoData.playUrl
-            ?: videoData.photoUrl
+        val playUrl = photo.mainMvUrls?.firstOrNull()?.url
             ?: throw IllegalStateException("快手视频 URL 为空")
 
         return ParsedMedia.Video(
-            id = videoData.photoId ?: "",
+            id = photo.photoId,
             platform = "kuaishou",
-            authorName = videoData.userName ?: "快手用户",
-            authorAvatar = videoData.headUrl ?: "",
-            title = videoData.caption ?: "快手视频",
-            coverUrl = videoData.coverUrl ?: "",
+            authorName = photo.userInfo.userName,
+            authorAvatar = photo.userInfo.headUrl ?: "",
+            title = photo.caption ?: "快手视频",
+            coverUrl = photo.coverUrls?.firstOrNull()?.url ?: "",
             stats = stats,
-            createTime = videoData.timestamp ?: 0,
-            shareUrl = videoData.shareUrl,
+            createTime = photo.timestamp,
+            shareUrl = photo.shareInfo?.shareUrl,
             videoUrl = playUrl,
-            duration = (videoData.duration ?: 0) / 1000,
-            width = videoData.width ?: 0,
-            height = videoData.height ?: 0,
+            duration = photo.duration / 1000,
+            width = photo.width,
+            height = photo.height,
             fileSize = 0,
             bitrate = 0
         )
@@ -656,7 +654,7 @@ object MediaMapper {
             width = bestFormat?.width ?: 0,
             height = bestFormat?.height ?: 0,
             fileSize = bestFormat?.contentLength ?: 0,
-            bitrate = bestFormat?.bitrate ?: 0
+            bitrate = bestFormat?.bitrate?.toLong() ?: 0
         )
     }
 
