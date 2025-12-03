@@ -24,7 +24,7 @@ object FormatUtils {
         val i = (Math.log(bytes.toDouble()) / Math.log(k)).toInt().coerceAtMost(units.size - 1)
         val size = bytes / k.pow(i)
 
-        return String.format("%.2f %s", size, units[i])
+        return String.format(Locale.US, "%.2f %s", size, units[i])
     }
 
     /**
@@ -40,9 +40,9 @@ object FormatUtils {
         val secs = seconds % 60
 
         return if (hours > 0) {
-            String.format("%02d:%02d:%02d", hours, minutes, secs)
+            String.format(Locale.US, "%02d:%02d:%02d", hours, minutes, secs)
         } else {
-            String.format("%02d:%02d", minutes, secs)
+            String.format(Locale.US, "%02d:%02d", minutes, secs)
         }
     }
 
@@ -61,8 +61,8 @@ object FormatUtils {
     fun formatCount(count: Long): String {
         return when {
             count < 10000 -> count.toString()
-            count < 100000000 -> String.format("%.1f万", count / 10000.0)
-            else -> String.format("%.1f亿", count / 100000000.0)
+            count < 100000000 -> String.format(Locale.US, "%.1f万", count / 10000.0)
+            else -> String.format(Locale.US, "%.1f亿", count / 100000000.0)
         }
     }
 
@@ -87,8 +87,8 @@ object FormatUtils {
 
         return when {
             bitrate < 1000 -> "${bitrate} bps"
-            bitrate < 1000000 -> String.format("%.1f Kbps", bitrate / 1000.0)
-            else -> String.format("%.1f Mbps", bitrate / 1000000.0)
+            bitrate < 1000000 -> String.format(Locale.US, "%.1f Kbps", bitrate / 1000.0)
+            else -> String.format(Locale.US, "%.1f Mbps", bitrate / 1000000.0)
         }
     }
 

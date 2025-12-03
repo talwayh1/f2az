@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.tikhub.videoparser.data.model.ParsedMedia
 import com.tikhub.videoparser.download.DownloadState
+import java.util.Locale
 
 /**
  * 解析结果卡片（视频/图文通用）
@@ -198,9 +199,9 @@ fun StatItem(icon: androidx.compose.ui.graphics.vector.ImageVector, count: Long)
 fun formatCount(count: Long): String {
     return when {
         count < 1000 -> count.toString()
-        count < 10000 -> String.format("%.1fk", count / 1000.0)
-        count < 100000000 -> String.format("%.1fw", count / 10000.0)
-        else -> String.format("%.1f亿", count / 100000000.0)
+        count < 10000 -> String.format(Locale.US, "%.1fk", count / 1000.0)
+        count < 100000000 -> String.format(Locale.US, "%.1fw", count / 10000.0)
+        else -> String.format(Locale.US, "%.1f亿", count / 100000000.0)
     }
 }
 
