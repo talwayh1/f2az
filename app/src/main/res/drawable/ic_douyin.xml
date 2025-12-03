@@ -1,0 +1,10 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 抖音图标 - 音符形状 -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M19,3H5C3.9,3 3,3.9 3,5v14c0,1.1 0.9,2 2,2h14c1.1,0 2,-0.9 2,-2V5C21,3.9 20.1,3 19,3zM12,17c-1.66,0 -3,-1.34 -3,-3c0,-1.66 1.34,-3 3,-3c0.35,0 0.69,0.06 1,0.17V7h4v2h-2v5C15,15.66 13.66,17 12,17z"/>
+</vector>

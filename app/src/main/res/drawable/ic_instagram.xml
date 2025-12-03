@@ -1,0 +1,18 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Instagram 图标 - 相机图标配合圆形边框 -->
+    <path
+        android:fillColor="#C13584"
+        android:pathData="M16,3H8C5.24,3 3,5.24 3,8v8c0,2.76 2.24,5 5,5h8c2.76,0 5,-2.24 5,-5V8c0,-2.76 -2.24,-5 -5,-5zM12,17c-2.76,0 -5,-2.24 -5,-5s2.24,-5 5,-5 5,2.24 5,5 -2.24,5 -5,5z"/>
+    <path
+        android:fillColor="#C13584"
+        android:pathData="M12,9c-1.66,0 -3,1.34 -3,3s1.34,3 3,3 3,-1.34 3,-3 -1.34,-3 -3,-3z"/>
+    <circle
+        android:fillColor="#C13584"
+        cx="17.5"
+        cy="6.5"
+        r="1"/>
+</vector>

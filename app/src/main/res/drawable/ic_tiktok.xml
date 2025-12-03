@@ -1,0 +1,10 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- TikTok 图标 - 简化版音符 -->
+    <path
+        android:fillColor="#FF0050"
+        android:pathData="M16,3h-3v12.5c0,1.93 -1.57,3.5 -3.5,3.5S6,17.43 6,15.5s1.57,-3.5 3.5,-3.5c0.34,0 0.68,0.05 1,0.14V9.17C10.18,9.06 9.84,9 9.5,9 6.46,9 4,11.46 4,14.5S6.46,20 9.5,20s5.5,-2.46 5.5,-5.5V8.82C16.44,9.77 18.16,10 20,10V7c-1.84,0 -3.56,-0.23 -4,-0.18V3z"/>
+</vector>

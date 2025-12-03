@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TikHub 视频解析</string>
+
+    <!-- 主页面 -->
+    <string name="input_hint">粘贴抖音/小红书/快手/TikTok 链接…</string>
+    <string name="parse_button">解析视频</string>
+    <string name="parsing">解析中…</string>
+    <string name="clipboard_detected">检测到剪贴板有链接，是否解析？</string>
+
+    <!-- 解析结果 -->
+    <string name="video_info">视频信息</string>
+    <string name="image_gallery">图片集</string>
+    <string name="author">作者</string>
+    <string name="likes">点赞</string>
+    <string name="comments">评论</string>
+    <string name="shares">分享</string>
+    <string name="resolution">分辨率</string>
+    <string name="duration">时长</string>
+    <string name="size">大小</string>
+
+    <!-- 下载 -->
+    <string name="save_video">保存视频</string>
+    <string name="save_all_images">保存全部图片</string>
+    <string name="downloading">下载中…</string>
+    <string name="download_success">下载成功</string>
+    <string name="download_failed">下载失败</string>
+
+    <!-- 错误提示 -->
+    <string name="error_empty_input">请输入链接</string>
+    <string name="error_no_url_found">未找到有效链接</string>
+    <string name="error_parse_failed">解析失败，请检查链接</string>
+    <string name="error_network">网络错误</string>
+    <string name="error_unsupported_platform">不支持的平台</string>
+
+    <!-- 权限 -->
+    <string name="permission_storage">需要存储权限以保存视频/图片</string>
+    <string name="permission_denied">权限被拒绝</string>
+</resources>
