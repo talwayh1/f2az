@@ -1,5 +1,7 @@
 package com.tikhub.videoparser.data.model
 
+import java.util.Locale
+
 /**
  * 统一的内容数据模型（密封类）
  *
@@ -67,9 +69,9 @@ sealed class ParsedMedia {
         fun getReadableFileSize(): String {
             return when {
                 fileSize < 1024 -> "$fileSize B"
-                fileSize < 1024 * 1024 -> String.format("%.1f KB", fileSize / 1024.0)
-                fileSize < 1024 * 1024 * 1024 -> String.format("%.1f MB", fileSize / (1024.0 * 1024))
-                else -> String.format("%.1f GB", fileSize / (1024.0 * 1024 * 1024))
+                fileSize < 1024 * 1024 -> String.format(Locale.US, "%.1f KB", fileSize / 1024.0)
+                fileSize < 1024 * 1024 * 1024 -> String.format(Locale.US, "%.1f MB", fileSize / (1024.0 * 1024))
+                else -> String.format(Locale.US, "%.1f GB", fileSize / (1024.0 * 1024 * 1024))
             }
         }
 
@@ -79,7 +81,7 @@ sealed class ParsedMedia {
         fun getFormattedDuration(): String {
             val minutes = duration / 60
             val seconds = duration % 60
-            return String.format("%02d:%02d", minutes, seconds)
+            return String.format(Locale.US, "%02d:%02d", minutes, seconds)
         }
     }
 
@@ -155,9 +157,9 @@ data class StatsInfo(
     private fun formatCount(count: Long): String {
         return when {
             count < 1000 -> count.toString()
-            count < 10000 -> String.format("%.1fk", count / 1000.0)
-            count < 100000000 -> String.format("%.1fw", count / 10000.0)
-            else -> String.format("%.1f亿", count / 100000000.0)
+            count < 10000 -> String.format(Locale.US, "%.1fk", count / 1000.0)
+            count < 100000000 -> String.format(Locale.US, "%.1fw", count / 10000.0)
+            else -> String.format(Locale.US, "%.1f亿", count / 100000000.0)
         }
     }
 }

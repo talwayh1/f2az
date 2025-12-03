@@ -82,11 +82,21 @@ object NetworkModule {
             chain.proceed(request)
         }
 
+        // User-Agent 拦截器：为所有请求添加 User-Agent
+        val userAgentInterceptor = okhttp3.Interceptor { chain ->
+            val originalRequest = chain.request()
+            val requestWithUserAgent = originalRequest.newBuilder()
+                .header("User-Agent", "TikHubVideoParser/1.0 (Android; Retrofit)")
+                .build()
+            chain.proceed(requestWithUserAgent)
+        }
+
         return OkHttpClient.Builder()
             .connectTimeout(ApiConstants.Timeout.CONNECT, TimeUnit.SECONDS)
             .readTimeout(ApiConstants.Timeout.READ, TimeUnit.SECONDS)
             .writeTimeout(ApiConstants.Timeout.WRITE, TimeUnit.SECONDS)
             .cache(cache)
+            .addInterceptor(userAgentInterceptor) // User-Agent (第一个，优先级最高)
             .addInterceptor(offlineCacheInterceptor) // 离线缓存
             .addNetworkInterceptor(cacheInterceptor) // 在线缓存
             .addInterceptor(loggingInterceptor)
