@@ -3,7 +3,6 @@ package com.tikhub.videoparser.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tikhub.videoparser.data.model.ParsedMedia
-import com.tikhub.videoparser.data.model.ParseResult
 import com.tikhub.videoparser.data.repository.VideoParserRepository
 import com.tikhub.videoparser.download.DownloadManager
 import com.tikhub.videoparser.download.DownloadState
@@ -20,7 +19,7 @@ import javax.inject.Inject
 sealed class UiState {
     object Idle : UiState() // 空闲状态
     object Loading : UiState() // 加载中
-    data class Success(val result: ParseResult) : UiState() // 解析成功
+    data class Success(val result: ParsedMedia) : UiState() // 解析成功
     data class Error(val message: String) : UiState() // 解析失败
 }
 

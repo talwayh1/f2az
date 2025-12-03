@@ -24,7 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tikhub.videoparser.data.model.ParsedMedia
 import com.tikhub.videoparser.ui.compose.MediaResultCard
-import com.tikhub.videoparser.ui.theme.VideoParserTheme
+import com.tikhub.videoparser.ui.theme.TikHubVideoParserTheme
 import com.tikhub.videoparser.ui.viewmodel.VideoParserViewModel
 import com.tikhub.videoparser.utils.DownloadHelper
 import dagger.hilt.android.AndroidEntryPoint

@@ -3,7 +3,10 @@ package com.tikhub.videoparser.data.repository
 import com.google.gson.Gson
 import com.tikhub.videoparser.data.api.TikHubApiService
 import com.tikhub.videoparser.data.mapper.MediaMapper
+import com.tikhub.videoparser.data.model.InstagramPostData
 import com.tikhub.videoparser.data.model.ParsedMedia
+import com.tikhub.videoparser.data.model.XiguaVideoData
+import com.tikhub.videoparser.data.model.YouTubeVideoData
 import com.tikhub.videoparser.utils.ApiConstants
 import com.tikhub.videoparser.utils.Platform
 import com.tikhub.videoparser.utils.ShortLinkResolver
