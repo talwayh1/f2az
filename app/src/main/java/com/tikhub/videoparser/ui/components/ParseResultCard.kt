@@ -20,7 +20,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
-import com.tikhub.videoparser.data.model.ParseResult
+import com.tikhub.videoparser.data.model.ParsedMedia
 import com.tikhub.videoparser.download.DownloadState
 import com.tikhub.videoparser.utils.FormatUtils
 
@@ -30,7 +30,7 @@ import com.tikhub.videoparser.utils.FormatUtils
  */
 @Composable
 fun ParseResultCard(
-    result: ParseResult,
+    result: ParsedMedia,
     downloadState: DownloadState = DownloadState.Idle,
     onDownloadVideo: (String) -> Unit = {},
     onDownloadAllImages: (List<String>) -> Unit = {},

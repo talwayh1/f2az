@@ -19,7 +19,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.tikhub.videoparser.ui.components.ParseResultCard
+import com.tikhub.videoparser.ui.compose.MediaResultCard
 import com.tikhub.videoparser.ui.viewmodel.MainViewModel
 import com.tikhub.videoparser.ui.viewmodel.UiState
 
@@ -151,14 +151,19 @@ fun MainScreen(
                 }
 
                 is UiState.Success -> {
-                    ParseResultCard(
-                        result = state.result,
-                        downloadState = downloadState,
-                        onDownloadVideo = { url ->
-                            viewModel.downloadVideo(url)
-                        },
-                        onDownloadAllImages = { urls ->
-                            viewModel.downloadAllImages(urls)
+                    MediaResultCard(
+                        media = state.result,
+                        onPlayVideo = { /* TODO: Implement video playback */ },
+                        onViewImage = { urls, index -> /* TODO: Implement image viewer */ },
+                        onDownload = {
+                            when (val media = state.result) {
+                                is com.tikhub.videoparser.data.model.ParsedMedia.Video -> {
+                                    viewModel.downloadVideo(media.videoUrl)
+                                }
+                                is com.tikhub.videoparser.data.model.ParsedMedia.ImageNote -> {
+                                    viewModel.downloadAllImages(media.imageUrls)
+                                }
+                            }
                         }
                     )
                 }
