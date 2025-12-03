@@ -56,14 +56,14 @@ object MediaMapper {
                 authorName = detail.author.nickname,
                 authorAvatar = authorAvatar,
                 title = detail.desc ?: "抖音图文",
-                coverUrl = detail.images.firstOrNull()?.getFirstUrl() ?: "",
+                coverUrl = detail.images?.firstOrNull()?.getFirstUrl() ?: "",
                 stats = stats,
                 createTime = detail.createTime,
                 shareUrl = detail.shareUrl,
-                imageUrls = detail.images.mapNotNull { it.getFirstUrl() },
-                imageSizes = detail.images.map {
+                imageUrls = detail.images?.mapNotNull { it.getFirstUrl() } ?: emptyList(),
+                imageSizes = detail.images?.map {
                     ImageSize(it.width, it.height, 0)
-                }
+                } ?: emptyList()
             )
         } else if (hasVideo) {
             // 视频模式
@@ -174,39 +174,51 @@ object MediaMapper {
         val isVideo = noteDetail.type == "video" && noteDetail.video != null
 
         val stats = StatsInfo(
-            likeCount = noteDetail.likedCount?.toLongOrNull() ?: 0,
-            commentCount = 0, // 小红书 API 可能不提供
-            shareCount = noteDetail.shareCount?.toLongOrNull() ?: 0,
-            collectCount = noteDetail.collectedCount?.toLongOrNull() ?: 0,
-            playCount = 0
+            likeCount = noteDetail.likedCount.toLong(),
+            commentCount = noteDetail.commentsCount.toLong(),
+            shareCount = noteDetail.sharedCount.toLong(),
+            collectCount = noteDetail.collectedCount.toLong(),
+            playCount = noteDetail.viewCount.toLong()
         )
 
-        val authorAvatar = noteDetail.user?.avatar ?: ""
+        val authorAvatar = noteDetail.user?.image ?: ""
         val authorName = noteDetail.user?.nickname ?: "小红书用户"
 
         return if (isVideo) {
             // 视频笔记
             val video = noteDetail.video!!
-            val videoUrl = video.media?.stream?.h264?.firstOrNull()?.masterUrl
-                ?: video.media?.stream?.h265?.firstOrNull()?.masterUrl
+
+            // 从 urlInfoList 中选择最佳质量（优先 H264）
+            val h264Url = video.urlInfoList
+                ?.firstOrNull { it.desc?.contains("h264", ignoreCase = true) == true }
+                ?.url
+            val h265Url = video.urlInfoList
+                ?.firstOrNull { it.desc?.contains("h265", ignoreCase = true) == true }
+                ?.url
+            val videoUrl = h264Url ?: h265Url ?: video.url
                 ?: throw IllegalStateException("小红书视频 URL 为空")
 
+            // 获取视频尺寸信息（从 H264 或默认）
+            val bestQuality = video.urlInfoList
+                ?.firstOrNull { it.desc?.contains("h264", ignoreCase = true) == true }
+                ?: video.urlInfoList?.firstOrNull()
+
             ParsedMedia.Video(
-                id = noteDetail.noteId ?: "",
+                id = noteDetail.id ?: "",
                 platform = "xiaohongshu",
                 authorName = authorName,
                 authorAvatar = authorAvatar,
                 title = noteDetail.title ?: noteDetail.desc ?: "小红书视频笔记",
-                coverUrl = noteDetail.cover?.url ?: "",
+                coverUrl = noteDetail.imagesList?.firstOrNull()?.url ?: "",
                 stats = stats,
-                createTime = noteDetail.time ?: 0,
-                shareUrl = noteDetail.shareUrl,
+                createTime = noteDetail.time,
+                shareUrl = noteDetail.shareInfo?.link,
                 videoUrl = videoUrl,
-                duration = (video.media?.stream?.h264?.firstOrNull()?.avgBitrate ?: 0) / 1000,
-                width = video.media?.stream?.h264?.firstOrNull()?.width ?: 0,
-                height = video.media?.stream?.h264?.firstOrNull()?.height ?: 0,
-                fileSize = video.media?.stream?.h264?.firstOrNull()?.size?.toLongOrNull() ?: 0,
-                bitrate = 0
+                duration = video.duration,
+                width = bestQuality?.width ?: video.width,
+                height = bestQuality?.height ?: video.height,
+                fileSize = 0,
+                bitrate = bestQuality?.avgBitrate?.toLong() ?: video.avgBitrate.toLong()
             )
         } else {
             // 图文笔记
@@ -216,7 +228,7 @@ object MediaMapper {
             }
 
             ParsedMedia.ImageNote(
-                id = noteDetail.noteId ?: "",
+                id = noteDetail.id ?: "",
                 platform = "xiaohongshu",
                 authorName = authorName,
                 authorAvatar = authorAvatar,
@@ -224,7 +236,7 @@ object MediaMapper {
                 coverUrl = imagesList.firstOrNull()?.url ?: "",
                 stats = stats,
                 createTime = noteDetail.time ?: 0,
-                shareUrl = noteDetail.shareUrl,
+                shareUrl = noteDetail.shareInfo?.link,
                 imageUrls = imagesList.mapNotNull { it.url },
                 imageSizes = imagesList.map {
                     ImageSize(it.width ?: 0, it.height ?: 0, 0)
@@ -287,18 +299,15 @@ object MediaMapper {
             ?: throw IllegalStateException("B站数据缺少 data 字段")
 
         val stats = StatsInfo(
-            likeCount = videoData.stat?.like ?: 0,
-            commentCount = videoData.stat?.reply ?: 0,
-            shareCount = videoData.stat?.share ?: 0,
-            collectCount = videoData.stat?.favorite ?: 0,
-            playCount = videoData.stat?.view ?: 0
+            likeCount = videoData.stat?.like?.toLong() ?: 0,
+            commentCount = videoData.stat?.reply?.toLong() ?: 0,
+            shareCount = videoData.stat?.share?.toLong() ?: 0,
+            collectCount = videoData.stat?.favorite?.toLong() ?: 0,
+            playCount = videoData.stat?.view?.toLong() ?: 0
         )
 
-        // B站视频 URL 需要从 durl 或 dash 中提取
-        val videoUrl = videoData.durl?.firstOrNull()?.url
-            ?: videoData.dash?.video?.firstOrNull()?.baseUrl
-            ?: throw IllegalStateException("B站视频 URL 为空")
-
+        // 注意：B站的视频播放地址需要额外的 API 调用获取
+        // 这里仅保存基础信息，实际播放地址需要通过 cid 和 bvid 获取
         return ParsedMedia.Video(
             id = videoData.bvid ?: videoData.aid?.toString() ?: "",
             platform = "bilibili",
@@ -307,10 +316,10 @@ object MediaMapper {
             title = videoData.title ?: "B站视频",
             coverUrl = videoData.pic ?: "",
             stats = stats,
-            createTime = videoData.ctime ?: 0,
+            createTime = videoData.ctime,
             shareUrl = "https://www.bilibili.com/video/${videoData.bvid}",
-            videoUrl = videoUrl,
-            duration = videoData.duration ?: 0,
+            videoUrl = "", // B站需要额外 API 获取真实播放地址
+            duration = videoData.duration,
             width = videoData.dimension?.width ?: 0,
             height = videoData.dimension?.height ?: 0,
             fileSize = 0,

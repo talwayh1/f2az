@@ -130,8 +130,8 @@ class VideoParserRepository @Inject constructor(
 
             // 接口轮询
             val endpoints = listOf(
-                "主接口(V3)" to { apiService.fetchDouyinVideo(awemeId, "Bearer ${ApiConstants.API_KEY}") },
-                "备用接口(V3_V2)" to { apiService.fetchDouyinVideoV2(awemeId, "Bearer ${ApiConstants.API_KEY}") }
+                "主接口(V3)" to suspend { apiService.fetchDouyinVideo(awemeId, "Bearer ${ApiConstants.API_KEY}") },
+                "备用接口(V3_V2)" to suspend { apiService.fetchDouyinVideoV2(awemeId, "Bearer ${ApiConstants.API_KEY}") }
             )
 
             for ((index, pair) in endpoints.withIndex()) {
@@ -179,8 +179,8 @@ class VideoParserRepository @Inject constructor(
             Timber.d("🔑 TikTok ID: $awemeId")
 
             val endpoints = listOf(
-                "主接口(V3)" to { apiService.fetchTikTokVideo(awemeId, "Bearer ${ApiConstants.API_KEY}") },
-                "备用接口(V3_V2)" to { apiService.fetchTikTokVideoV2(awemeId, "Bearer ${ApiConstants.API_KEY}") }
+                "主接口(V3)" to suspend { apiService.fetchTikTokVideo(awemeId, "Bearer ${ApiConstants.API_KEY}") },
+                "备用接口(V3_V2)" to suspend { apiService.fetchTikTokVideoV2(awemeId, "Bearer ${ApiConstants.API_KEY}") }
             )
 
             for ((index, pair) in endpoints.withIndex()) {
@@ -264,8 +264,8 @@ class VideoParserRepository @Inject constructor(
             Timber.d("🔑 快手视频 ID: $photoId")
 
             val endpoints = listOf(
-                "主接口(App)" to { apiService.fetchKuaishouVideo(photoId, "Bearer ${ApiConstants.API_KEY}") },
-                "备用接口(Web V2)" to { apiService.fetchKuaishouVideoV2(photoId, "Bearer ${ApiConstants.API_KEY}") }
+                "主接口(App)" to suspend { apiService.fetchKuaishouVideo(photoId, "Bearer ${ApiConstants.API_KEY}") },
+                "备用接口(Web V2)" to suspend { apiService.fetchKuaishouVideoV2(photoId, "Bearer ${ApiConstants.API_KEY}") }
             )
 
             for ((index, pair) in endpoints.withIndex()) {
@@ -313,8 +313,8 @@ class VideoParserRepository @Inject constructor(
             Timber.d("🔑 B站 BV号: $bvId")
 
             val endpoints = listOf(
-                "主接口(Web)" to { apiService.fetchBilibiliVideo(bvId, "Bearer ${ApiConstants.API_KEY}") },
-                "备用接口(App)" to { apiService.fetchBilibiliVideoV2(bvId, "Bearer ${ApiConstants.API_KEY}") }
+                "主接口(Web)" to suspend { apiService.fetchBilibiliVideo(bvId, "Bearer ${ApiConstants.API_KEY}") },
+                "备用接口(App)" to suspend { apiService.fetchBilibiliVideoV2(bvId, "Bearer ${ApiConstants.API_KEY}") }
             )
 
             for ((index, pair) in endpoints.withIndex()) {
