@@ -265,7 +265,7 @@ fun VideoSection(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("下载完成")
                 }
-                is DownloadState.Error -> {
+                is DownloadState.Failed -> {
                     Icon(Icons.Default.Error, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("下载失败")
@@ -338,7 +338,7 @@ fun ImageGallerySection(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("下载完成")
                 }
-                is DownloadState.Error -> {
+                is DownloadState.Failed -> {
                     Icon(Icons.Default.Error, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("下载失败")
