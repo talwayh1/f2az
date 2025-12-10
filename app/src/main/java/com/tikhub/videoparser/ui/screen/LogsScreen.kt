@@ -6,7 +6,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Pause
@@ -75,8 +75,14 @@ fun LogsScreen(
             logDir.listFiles()?.forEach { it.delete() }
             logLines = listOf("所有日志已清空")
             totalLines = 0
+            android.widget.Toast.makeText(context, "日志已清空", android.widget.Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             logLines = listOf("清空日志失败：${e.message}")
+            android.widget.Toast.makeText(
+                context,
+                "清空日志失败：${e.message}",
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
         }
     }
 
@@ -125,16 +131,22 @@ fun LogsScreen(
                             Text(
                                 "自动刷新中...",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary
+                                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
                             )
                         }
                     }
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, "返回")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
                     }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimary,
+                    actionIconContentColor = MaterialTheme.colorScheme.onPrimary
+                ),
                 actions = {
                     // 自动刷新开关
                     IconButton(
@@ -142,8 +154,7 @@ fun LogsScreen(
                     ) {
                         Icon(
                             if (autoRefresh) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (autoRefresh) "暂停自动刷新" else "开启自动刷新",
-                            tint = if (autoRefresh) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            contentDescription = if (autoRefresh) "暂停自动刷新" else "开启自动刷新"
                         )
                     }
                     // 手动刷新按钮
@@ -152,7 +163,20 @@ fun LogsScreen(
                     }
                     // 复制按钮
                     IconButton(onClick = {
-                        clipboardManager.setText(AnnotatedString(logLines.joinToString("\n")))
+                        if (logLines.isNotEmpty()) {
+                            clipboardManager.setText(AnnotatedString(logLines.joinToString("\n")))
+                            android.widget.Toast.makeText(
+                                context,
+                                "已复制 ${logLines.size} 条日志",
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        } else {
+                            android.widget.Toast.makeText(
+                                context,
+                                "没有可复制的日志",
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        }
                     }) {
                         Icon(Icons.Default.ContentCopy, "复制全部")
                     }
@@ -225,19 +249,19 @@ private fun LogLineItem(
     line: String,
     index: Int
 ) {
-    // 隔行换色：奇数行和偶数行使用不同的背景色
+    // 隔行换色：奇数行和偶数行使用不同的背景色（更明显的对比）
     val backgroundColor = if (index % 2 == 0) {
         MaterialTheme.colorScheme.surface
     } else {
-        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)  // 增加透明度使对比更明显
     }
 
     // 根据日志内容判断日志级别，设置不同的文本颜色
     val textColor = when {
-        line.contains("ERROR", ignoreCase = true) || line.contains("错误") -> Color(0xFFEF5350)
-        line.contains("WARN", ignoreCase = true) || line.contains("警告") -> Color(0xFFFF9800)
-        line.contains("INFO", ignoreCase = true) || line.contains("信息") -> Color(0xFF66BB6A)
-        line.contains("DEBUG", ignoreCase = true) || line.contains("调试") -> Color(0xFF42A5F5)
+        line.contains("ERROR", ignoreCase = true) || line.contains("错误") || line.contains("E/") -> Color(0xFFEF5350)  // 红色
+        line.contains("WARN", ignoreCase = true) || line.contains("警告") || line.contains("W/") -> Color(0xFFFF9800)   // 橙色
+        line.contains("INFO", ignoreCase = true) || line.contains("信息") || line.contains("I/") -> Color(0xFF66BB6A)   // 绿色
+        line.contains("DEBUG", ignoreCase = true) || line.contains("调试") || line.contains("D/") -> Color(0xFF42A5F5)  // 蓝色
         line.startsWith("...") -> MaterialTheme.colorScheme.onSurfaceVariant // 省略提示行
         else -> MaterialTheme.colorScheme.onSurface
     }

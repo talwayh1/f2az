@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Comment
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -52,7 +53,7 @@ fun ParseResultCard(
             )
 
             Spacer(modifier = Modifier.height(12.dp))
-            Divider()
+            HorizontalDivider()
             Spacer(modifier = Modifier.height(12.dp))
 
             // 标题/描述（完整显示，支持复制）
@@ -168,7 +169,7 @@ fun StatisticsSection(
             StatItem(icon = Icons.Default.Favorite, count = likes)
         }
         if (comments > 0) {
-            StatItem(icon = Icons.Default.Comment, count = comments)
+            StatItem(icon = Icons.AutoMirrored.Filled.Comment, count = comments)
         }
         if (shares > 0) {
             StatItem(icon = Icons.Default.Share, count = shares)

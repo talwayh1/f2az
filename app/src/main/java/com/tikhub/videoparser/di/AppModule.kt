@@ -1,6 +1,7 @@
 package com.tikhub.videoparser.di
 
 import android.content.Context
+import androidx.work.WorkManager
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -22,5 +23,12 @@ object AppModule {
     fun provideApplicationContext(@ApplicationContext context: Context): Context {
         Timber.d("提供 Application Context")
         return context
+    }
+
+    @Provides
+    @Singleton
+    fun provideWorkManager(@ApplicationContext context: Context): WorkManager {
+        Timber.d("提供 WorkManager 实例")
+        return WorkManager.getInstance(context)
     }
 }

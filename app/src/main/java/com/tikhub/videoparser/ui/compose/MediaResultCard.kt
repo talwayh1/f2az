@@ -3,6 +3,7 @@ package com.tikhub.videoparser.ui.compose
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -38,18 +39,25 @@ import com.tikhub.videoparser.utils.themeColor
  * 2. 平台识别：显示平台图标和品牌色
  * 3. 统计信息：格式化显示点赞、评论等数据
  * 4. 交互支持：视频播放、图片查看、下载功能
+ * 5. 解析信息：显示耗时、费用、接口信息
  *
  * @param media ParsedMedia 数据（Video 或 ImageNote）
+ * @param parseResultWrapper 解析结果包装（包含耗时和费用信息）
  * @param onPlayVideo 点击播放视频的回调
  * @param onViewImage 点击查看图片的回调
  * @param onDownload 点击下载的回调
+ * @param downloadState 下载状态
  */
 @Composable
 fun MediaResultCard(
     media: ParsedMedia,
+    parseResultWrapper: com.tikhub.videoparser.data.model.ParseResultWrapper? = null,
     onPlayVideo: (String) -> Unit = {},
     onViewImage: (List<String>, Int) -> Unit = { _, _ -> },
     onDownload: () -> Unit = {},
+    onTranscode: (String) -> Unit = {},  // 🎯 新增：转码回调
+    downloadState: com.tikhub.videoparser.download.DownloadState = com.tikhub.videoparser.download.DownloadState.Idle,
+    downloadedFilePath: String? = null,  // 🎯 新增：已下载文件路径
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -75,42 +83,47 @@ fun MediaResultCard(
 
             // 2. 内容展示区：根据类型分发
             when (media) {
-                is ParsedMedia.Video -> VideoContent(
-                    video = media,
-                    onPlay = onPlayVideo
-                )
-                is ParsedMedia.ImageNote -> ImageNoteContent(
-                    imageNote = media,
-                    onViewImage = onViewImage
-                )
+                is ParsedMedia.Video -> {
+                    VideoContent(
+                        video = media,
+                        onPlay = onPlayVideo
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    VideoInfoSection(video = media)
+                }
+                is ParsedMedia.ImageNote -> {
+                    ImageNoteContent(
+                        imageNote = media,
+                        onViewImage = onViewImage
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    ImageInfoSection(imageNote = media)
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // 3. 标题和统计信息
-            Text(
-                text = media.title,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurface
+            // 3. 标题和统计信息（可复制）
+            TitleSection(
+                title = media.title,
+                stats = media.stats
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = media.stats.getFormattedStats(),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            // 4. 解析信息展示（如果有数据）
+            if (parseResultWrapper != null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                ParseInfoSection(parseResultWrapper = parseResultWrapper, platform = media.platform)
+            }
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // 4. 操作按钮
+            // 5. 操作按钮
             ActionButtons(
                 media = media,
-                onDownload = onDownload
+                onDownload = onDownload,
+                onTranscode = onTranscode,
+                downloadState = downloadState,
+                downloadedFilePath = downloadedFilePath
             )
         }
     }
@@ -156,15 +169,28 @@ private fun AuthorHeader(
             )
         }
 
-        // 平台图标
+        // 平台名称 + 图标
         val platformEnum = Platform.values().find { it.apiParam == platform }
         if (platformEnum != null) {
-            Icon(
-                painter = painterResource(id = platformEnum.iconRes),
-                contentDescription = platformEnum.displayName,
-                tint = Color(platformEnum.themeColor),
-                modifier = Modifier.size(28.dp)
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                // 平台文字
+                Text(
+                    text = platformEnum.displayName,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Medium,
+                    color = Color(platformEnum.themeColor)
+                )
+                // 平台图标
+                Icon(
+                    painter = painterResource(id = platformEnum.iconRes),
+                    contentDescription = platformEnum.displayName,
+                    tint = Color(platformEnum.themeColor),
+                    modifier = Modifier.size(24.dp)
+                )
+            }
         }
     }
 }
@@ -262,7 +288,7 @@ private fun VideoContent(
 }
 
 /**
- * 图文内容展示
+ * 图文内容展示（显示所有图片）
  */
 @Composable
 private fun ImageNoteContent(
@@ -297,7 +323,7 @@ private fun ImageNoteContent(
                     .heightIn(max = 300.dp)
                     .clip(RoundedCornerShape(12.dp))
             ) {
-                items(imageNote.imageUrls.take(4)) { imageUrl ->
+                items(imageNote.imageUrls) { imageUrl ->
                     AsyncImage(
                         model = ImageRequest.Builder(LocalContext.current)
                             .data(imageUrl)
@@ -316,51 +342,48 @@ private fun ImageNoteContent(
             }
         }
         else -> {
-            // 多图（九宫格）
+            // 多图（最多显示12张，使用固定高度避免无限约束）
+            val displayImages = imageNote.imageUrls.take(12)
+            val rows = kotlin.math.ceil(displayImages.size / 3.0).toInt()
+            val gridHeight = (rows * 120 + (rows - 1) * 4).dp // 每行120dp + 间距4dp
+
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 300.dp)
-                    .clip(RoundedCornerShape(12.dp))
+                    .height(gridHeight) // 设置固定高度避免无限约束
+                    .clip(RoundedCornerShape(12.dp)),
+                userScrollEnabled = false // 禁用内部滚动，使用外部滚动
             ) {
-                items(imageNote.imageUrls.take(9)) { imageUrl ->
-                    Box {
-                        AsyncImage(
-                            model = ImageRequest.Builder(LocalContext.current)
-                                .data(imageUrl)
-                                .crossfade(true)
-                                .build(),
-                            contentDescription = "图片",
-                            modifier = Modifier
-                                .aspectRatio(1f)
-                                .clickable {
-                                    val index = imageNote.imageUrls.indexOf(imageUrl)
-                                    onViewImage(imageNote.imageUrls, index)
-                                },
-                            contentScale = ContentScale.Crop
-                        )
-
-                        // 显示剩余图片数量
-                        if (imageNote.imageUrls.indexOf(imageUrl) == 8 && imageNote.imageUrls.size > 9) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(Color.Black.copy(alpha = 0.6f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "+${imageNote.imageUrls.size - 9}",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
+                items(displayImages) { imageUrl ->
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(imageUrl)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = "图片",
+                        modifier = Modifier
+                            .aspectRatio(1f)
+                            .clickable {
+                                val index = imageNote.imageUrls.indexOf(imageUrl)
+                                onViewImage(imageNote.imageUrls, index)
+                            },
+                        contentScale = ContentScale.Crop
+                    )
                 }
+            }
+
+            // 如果图片超过12张，显示提示
+            if (imageNote.imageUrls.size > 12) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "还有 ${imageNote.imageUrls.size - 12} 张图片未显示，点击图片查看全部",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
             }
         }
     }
@@ -389,50 +412,485 @@ private fun ImageNoteContent(
 }
 
 /**
+ * 视频信息区域
+ */
+@Composable
+private fun VideoInfoSection(video: ParsedMedia.Video) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        ),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp)
+        ) {
+            // 🎯 新增：编码技术信息（如果有数据）
+            if (!video.codecType.isNullOrBlank() || video.fps > 0 || !video.qualityTag.isNullOrBlank()) {
+                // 技术信息标题
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "📹 编码信息",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    // 视频来源标签
+                    if (!video.videoSource.isNullOrBlank()) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = video.getSourceDescription(),
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // 编码格式和帧率
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    if (!video.codecType.isNullOrBlank()) {
+                        InfoItem(label = "编码格式", value = video.codecType)
+                    }
+                    if (video.fps > 0) {
+                        InfoItem(label = "帧率", value = "${video.fps} fps")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // 分隔线
+                androidx.compose.material3.HorizontalDivider(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            // 基本信息
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                InfoItem(label = "清晰度", value = video.qualityTag ?: video.getQualityDescription())
+                InfoItem(label = "时长", value = video.getFormattedDuration())
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                InfoItem(label = "分辨率", value = video.getResolutionDescription())
+                InfoItem(label = "大小", value = video.getReadableFileSize())
+            }
+
+            if (video.bitrate > 0) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    InfoItem(label = "码率", value = video.getReadableBitrate())
+                    if (video.fps == 0) {
+                        // 如果没有实际 FPS 数据,显示估算值
+                        InfoItem(label = "帧率(估算)", value = video.getEstimatedFPS())
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 图片信息区域
+ */
+@Composable
+private fun ImageInfoSection(imageNote: ParsedMedia.ImageNote) {
+    val firstImageInfo = imageNote.getFirstImageInfo()
+    val totalSize = imageNote.getTotalImageSize()
+
+    if (firstImageInfo != null || imageNote.imageUrls.isNotEmpty()) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            ),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    InfoItem(label = "图片数量", value = "${imageNote.imageUrls.size}张")
+                    if (firstImageInfo != null) {
+                        InfoItem(label = "首图", value = firstImageInfo)
+                    }
+                }
+
+                if (imageNote.imageSizes != null && imageNote.imageSizes.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    InfoItem(label = "总大小", value = totalSize)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 信息项组件
+ */
+@Composable
+private fun InfoItem(label: String, value: String) {
+    Column {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+    }
+}
+
+/**
+ * 标题区域（可复制、可选择）
+ */
+@Composable
+private fun TitleSection(title: String, stats: com.tikhub.videoparser.data.model.StatsInfo) {
+    val context = LocalContext.current
+
+    Column {
+        // 标题（可选择文字、可一键复制）
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top
+        ) {
+            // 使用 SelectionContainer 让文字可以被选择复制
+            SelectionContainer(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+
+            // 一键复制按钮
+            IconButton(
+                onClick = {
+                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                        as android.content.ClipboardManager
+                    clipboard.setPrimaryClip(
+                        android.content.ClipData.newPlainText("标题", title)
+                    )
+                    android.widget.Toast.makeText(context, "标题已复制", android.widget.Toast.LENGTH_SHORT).show()
+                },
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ContentCopy,
+                    contentDescription = "复制标题",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 统计信息
+        Text(
+            text = stats.getFormattedStats(),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+/**
+ * 解析信息区域
+ */
+@Composable
+private fun ParseInfoSection(
+    parseResultWrapper: com.tikhub.videoparser.data.model.ParseResultWrapper,
+    platform: String
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+        ),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp)
+        ) {
+            // 标题
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "📊 解析信息",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                // 性能等级标签
+                val perfLevel = parseResultWrapper.getPerformanceLevel()
+                Surface(
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                    shape = RoundedCornerShape(4.dp)
+                ) {
+                    Text(
+                        text = "${perfLevel.emoji} ${perfLevel.displayName}",
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // 解析详情
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                // 耗时
+                InfoChip(
+                    icon = "⏱️",
+                    label = "耗时",
+                    value = parseResultWrapper.getTimeDisplay()
+                )
+                // 费用
+                InfoChip(
+                    icon = "💰",
+                    label = "费用",
+                    value = parseResultWrapper.getCostDisplay()
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // 接口信息
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "🔗",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "接口: /api/hybrid/${platform}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 信息芯片组件
+ */
+@Composable
+private fun InfoChip(icon: String, label: String, value: String) {
+    Column(
+        horizontalAlignment = Alignment.Start
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = icon,
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.primary
+        )
+    }
+}
+
+/**
  * 操作按钮区域
  */
 @Composable
 private fun ActionButtons(
     media: ParsedMedia,
-    onDownload: () -> Unit
+    onDownload: () -> Unit,
+    onTranscode: (String) -> Unit,
+    downloadState: com.tikhub.videoparser.download.DownloadState,
+    downloadedFilePath: String?
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        // 下载进度条（在按钮上方显示）
+        if (downloadState is com.tikhub.videoparser.download.DownloadState.Downloading) {
+            androidx.compose.material3.LinearProgressIndicator(
+                progress = { downloadState.progress / 100f },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "下载中 ${downloadState.progress}%",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 8.dp)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
         // 下载按钮
         Button(
             onClick = onDownload,
-            modifier = Modifier.weight(1f),
-            shape = RoundedCornerShape(8.dp)
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(8.dp),
+            enabled = downloadState !is com.tikhub.videoparser.download.DownloadState.Downloading
         ) {
-            Icon(
-                imageVector = Icons.Default.Download,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp)
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(
-                text = when (media) {
-                    is ParsedMedia.Video -> "下载视频"
-                    is ParsedMedia.ImageNote -> "保存图片 (${media.imageUrls.size})"
+            when (downloadState) {
+                is com.tikhub.videoparser.download.DownloadState.Downloading -> {
+                    androidx.compose.material3.CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("下载中...")
                 }
+                is com.tikhub.videoparser.download.DownloadState.Success -> {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("${downloadState.getSuccessMessage()} - 再次下载")
+                }
+                is com.tikhub.videoparser.download.DownloadState.Failed -> {
+                    Icon(
+                        imageVector = Icons.Default.Error,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("下载失败 - 重试")
+                }
+                else -> {
+                    Icon(
+                        imageVector = Icons.Default.Download,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = when (media) {
+                            is ParsedMedia.Video -> "下载视频"
+                            is ParsedMedia.ImageNote -> "保存图片 (${media.imageUrls.size})"
+                        }
+                    )
+                }
+            }
+        }
+
+        // 🎯 转码按钮（仅对 ByteVC2 视频显示）
+        if (media is ParsedMedia.Video &&
+            media.codecType == "ByteVC2" &&
+            downloadedFilePath != null &&
+            downloadState is com.tikhub.videoparser.download.DownloadState.Success) {
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedButton(
+                onClick = { onTranscode(downloadedFilePath) },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = MaterialTheme.colorScheme.secondary
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Transform,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("转码为 H.264 (兼容格式)")
+            }
+
+            // 转码提示信息
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "⚠️ ByteVC2 编码可能无法在部分设备播放，建议转码",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.padding(horizontal = 8.dp)
             )
         }
 
-        // 分享按钮
-        OutlinedButton(
-            onClick = { /* TODO: 实现分享功能 */ },
-            modifier = Modifier.weight(1f),
-            shape = RoundedCornerShape(8.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Share,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp)
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(text = "分享")
+        // 下载状态消息
+        when (downloadState) {
+            is com.tikhub.videoparser.download.DownloadState.Success -> {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "已保存到: ${downloadState.filePath}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            is com.tikhub.videoparser.download.DownloadState.Failed -> {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "错误: ${downloadState.error}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
+            }
+            else -> {}
         }
     }
 }

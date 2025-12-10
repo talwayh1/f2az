@@ -185,7 +185,29 @@ data class XiaohongshuImage(
     val height: Int = 0,
 
     @SerializedName("index")
-    val index: Int = 0
+    val index: Int = 0,
+
+    // 🎯 新增：Live Photo 实况视频 URL（小红书特有功能）
+    @SerializedName("live_photo")
+    val livePhoto: XiaohongshuLivePhoto? = null
+)
+
+/**
+ * 小红书 Live Photo（实况照片）数据结构
+ * Live Photo 是静态图片 + 短视频的组合
+ */
+data class XiaohongshuLivePhoto(
+    @SerializedName("url")
+    val url: String? = null,
+
+    @SerializedName("duration")
+    val duration: Int = 0,
+
+    @SerializedName("width")
+    val width: Int = 0,
+
+    @SerializedName("height")
+    val height: Int = 0
 )
 
 data class XiaohongshuShareInfo(

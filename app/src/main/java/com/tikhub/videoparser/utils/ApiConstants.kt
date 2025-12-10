@@ -63,11 +63,12 @@ object ApiConstants {
 
     /**
      * 超时配置（秒）
+     * 优化：增加超时时间以应对网络不稳定情况
      */
     object Timeout {
-        const val CONNECT = 15L
-        const val READ = 30L
-        const val WRITE = 30L
+        const val CONNECT = 20L  // 连接超时：20秒（应对网络延迟）
+        const val READ = 30L     // 读取超时：30秒（应对大数据传输）
+        const val WRITE = 30L    // 写入超时：30秒
     }
 
     /**

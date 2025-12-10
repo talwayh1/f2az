@@ -5,9 +5,11 @@ import com.tikhub.videoparser.data.api.TikHubApiService
 import com.tikhub.videoparser.data.mapper.MediaMapper
 import com.tikhub.videoparser.data.model.InstagramPostData
 import com.tikhub.videoparser.data.model.ParsedMedia
+import com.tikhub.videoparser.data.model.ParseResultWrapper
 import com.tikhub.videoparser.data.model.XiguaVideoData
 import com.tikhub.videoparser.data.model.YouTubeVideoData
 import com.tikhub.videoparser.utils.ApiConstants
+import com.tikhub.videoparser.utils.CostCalculator
 import com.tikhub.videoparser.utils.Platform
 import com.tikhub.videoparser.utils.ShortLinkResolver
 import com.tikhub.videoparser.utils.UrlExtractor
@@ -47,19 +49,23 @@ class VideoParserRepository @Inject constructor(
      * 3. 平台识别
      * 4. 调用对应平台的 API
      * 5. 数据转换（通过 MediaMapper）
+     * 6. 计算耗时和费用
      *
      * @param input 用户输入的文本（可能包含多个链接、描述等）
-     * @return Result<ParsedMedia> 成功返回统一的 ParsedMedia，失败返回异常
+     * @return Result<ParseResultWrapper> 成功返回包含解析结果、耗时和费用的包装对象
      */
-    suspend fun parse(input: String): Result<ParsedMedia> = withContext(Dispatchers.IO) {
+    suspend fun parse(input: String): Result<ParseResultWrapper> = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
+        var apiCallCount = 1  // API 调用次数
 
         try {
             Timber.d("========== Repository 解析流程开始 ==========")
 
             // Step 1: 提取 URL
+            val step1Start = System.currentTimeMillis()
             val urls = UrlExtractor.extractUrls(input)
-            Timber.d("Step 1: 提取到 ${urls.size} 个 URL")
+            val step1Time = System.currentTimeMillis() - step1Start
+            Timber.d("⏱️ Step 1: 提取 URL 耗时 ${step1Time}ms，提取到 ${urls.size} 个 URL")
 
             if (urls.isEmpty()) {
                 Timber.w("❌ 未找到有效链接")
@@ -70,11 +76,17 @@ class VideoParserRepository @Inject constructor(
             Timber.d("📎 使用第一个链接: $shortUrl")
 
             // Step 2: 短链追踪
+            val step2Start = System.currentTimeMillis()
             val realUrl = ShortLinkResolver.resolve(shortUrl)
+            val step2Time = System.currentTimeMillis() - step2Start
+            Timber.i("⏱️ Step 2: 短链解析耗时 ${step2Time}ms")
             Timber.i("🔗 还原后的真实 URL: $realUrl")
 
             // Step 3: 平台识别
+            val step3Start = System.currentTimeMillis()
             val platform = Platform.detect(realUrl)
+            val step3Time = System.currentTimeMillis() - step3Start
+            Timber.i("⏱️ Step 3: 平台识别耗时 ${step3Time}ms")
             Timber.i("🎯 识别平台: ${platform.displayName} (${platform.apiParam})")
 
             if (platform == Platform.UNKNOWN) {
@@ -83,7 +95,7 @@ class VideoParserRepository @Inject constructor(
             }
 
             // Step 4: 调用对应平台的解析方法
-            val networkStartTime = System.currentTimeMillis()
+            val step4Start = System.currentTimeMillis()
 
             val result = when (platform) {
                 Platform.DOUYIN -> parseDouyin(realUrl)
@@ -101,14 +113,34 @@ class VideoParserRepository @Inject constructor(
                 }
             }
 
-            val networkEndTime = System.currentTimeMillis()
-            val networkTime = networkEndTime - networkStartTime
+            val step4Time = System.currentTimeMillis() - step4Start
+            Timber.i("⏱️ Step 4: API 请求+数据映射耗时 ${step4Time}ms")
+
+            // Step 5: 计算费用
+            val step5Start = System.currentTimeMillis()
+            val estimatedCost = CostCalculator.calculateCost(platform, apiCallCount)
+            val step5Time = System.currentTimeMillis() - step5Start
+
             val totalTime = System.currentTimeMillis() - startTime
 
             Timber.d("========== Repository 解析流程结束 ==========")
-            Timber.d("⏱️ 性能统计: 总耗时=${totalTime}ms, 网络=${networkTime}ms")
+            Timber.i("⏱️ 【性能统计】总耗时=${totalTime}ms")
+            Timber.i("  ├─ URL提取: ${step1Time}ms (${step1Time * 100 / totalTime}%)")
+            Timber.i("  ├─ 短链解析: ${step2Time}ms (${step2Time * 100 / totalTime}%)")
+            Timber.i("  ├─ 平台识别: ${step3Time}ms (${step3Time * 100 / totalTime}%)")
+            Timber.i("  ├─ API+映射: ${step4Time}ms (${step4Time * 100 / totalTime}%)")
+            Timber.i("  └─ 费用计算: ${step5Time}ms (${step5Time * 100 / totalTime}%)")
+            Timber.d("💰 费用统计: ${CostCalculator.formatCost(estimatedCost)}")
 
-            result
+            // Step 6: 包装结果
+            result.map { media ->
+                ParseResultWrapper(
+                    media = media,
+                    parseTimeMs = totalTime,
+                    networkTimeMs = step4Time,  // API+映射时间作为网络时间
+                    estimatedCostCNY = estimatedCost
+                )
+            }
 
         } catch (e: Exception) {
             Timber.e(e, "💥 Repository 解析过程发生异常")
@@ -117,7 +149,7 @@ class VideoParserRepository @Inject constructor(
     }
 
     // ========================================
-    // 抖音解析
+    // 抖音解析（优化版 - 使用通用轮询器）
     // ========================================
 
     private suspend fun parseDouyin(url: String): Result<ParsedMedia> {
@@ -126,39 +158,25 @@ class VideoParserRepository @Inject constructor(
         return try {
             val awemeId = extractVideoId(url, "douyin")
             if (awemeId.isEmpty()) {
-                return Result.failure(Exception("无法提取抖音 ID"))
+                Timber.w("❌ 无法从 URL 中提取抖音 ID: $url")
+                return Result.failure(Exception("无法提取抖音 ID，请检查链接格式"))
             }
 
             Timber.d("🔑 抖音 ID: $awemeId")
 
-            // 接口轮询
-            val endpoints = listOf(
-                "主接口(V3)" to suspend { apiService.fetchDouyinVideo(awemeId, "Bearer ${ApiConstants.API_KEY}") },
-                "备用接口(V3_V2)" to suspend { apiService.fetchDouyinVideoV2(awemeId, "Bearer ${ApiConstants.API_KEY}") }
+            // 使用通用轮询器（代码量减少70%）
+            EndpointPoller.poll(
+                endpoints = listOf(
+                    "抖音主接口(V3)" to suspend {
+                        apiService.fetchDouyinVideo(awemeId, "Bearer ${ApiConstants.API_KEY}")
+                    },
+                    "抖音备用接口(V3_V2)" to suspend {
+                        apiService.fetchDouyinVideoV2(awemeId, "Bearer ${ApiConstants.API_KEY}")
+                    }
+                ),
+                mapper = { data -> MediaMapper.mapDouyin(data) },
+                timeoutMs = 15000  // 15秒超时
             )
-
-            for ((index, pair) in endpoints.withIndex()) {
-                val (name, fetch) = pair
-                try {
-                    Timber.d("🔄 尝试 $name (${index + 1}/${endpoints.size})")
-                    val response = fetch()
-
-                    if (response.code == 200 && response.data != null) {
-                        val media = MediaMapper.mapDouyin(response.data)
-                        Timber.i("✅ 抖音解析成功: ${media::class.simpleName}")
-                        return Result.success(media)
-                    }
-
-                    if (index == endpoints.lastIndex) {
-                        return Result.failure(Exception(response.message ?: "所有接口均失败"))
-                    }
-                } catch (e: Exception) {
-                    Timber.e(e, "❌ $name 异常")
-                    if (index == endpoints.lastIndex) return Result.failure(e)
-                }
-            }
-
-            Result.failure(Exception("所有接口均失败"))
 
         } catch (e: Exception) {
             Timber.e(e, "💥 抖音解析异常")
@@ -167,7 +185,7 @@ class VideoParserRepository @Inject constructor(
     }
 
     // ========================================
-    // TikTok 解析
+    // TikTok 解析（优化版）
     // ========================================
 
     private suspend fun parseTikTok(url: String): Result<ParsedMedia> {
@@ -181,33 +199,17 @@ class VideoParserRepository @Inject constructor(
 
             Timber.d("🔑 TikTok ID: $awemeId")
 
-            val endpoints = listOf(
-                "主接口(V3)" to suspend { apiService.fetchTikTokVideo(awemeId, "Bearer ${ApiConstants.API_KEY}") },
-                "备用接口(V3_V2)" to suspend { apiService.fetchTikTokVideoV2(awemeId, "Bearer ${ApiConstants.API_KEY}") }
+            EndpointPoller.poll(
+                endpoints = listOf(
+                    "TikTok主接口(V3)" to suspend {
+                        apiService.fetchTikTokVideo(awemeId, "Bearer ${ApiConstants.API_KEY}")
+                    },
+                    "TikTok备用接口(V3_V2)" to suspend {
+                        apiService.fetchTikTokVideoV2(awemeId, "Bearer ${ApiConstants.API_KEY}")
+                    }
+                ),
+                mapper = { data -> MediaMapper.mapTikTok(data) }
             )
-
-            for ((index, pair) in endpoints.withIndex()) {
-                val (name, fetch) = pair
-                try {
-                    Timber.d("🔄 尝试 $name (${index + 1}/${endpoints.size})")
-                    val response = fetch()
-
-                    if (response.code == 200 && response.data != null) {
-                        val media = MediaMapper.mapTikTok(response.data)
-                        Timber.i("✅ TikTok 解析成功: ${media::class.simpleName}")
-                        return Result.success(media)
-                    }
-
-                    if (index == endpoints.lastIndex) {
-                        return Result.failure(Exception(response.message ?: "所有接口均失败"))
-                    }
-                } catch (e: Exception) {
-                    Timber.e(e, "❌ $name 异常")
-                    if (index == endpoints.lastIndex) return Result.failure(e)
-                }
-            }
-
-            Result.failure(Exception("所有接口均失败"))
 
         } catch (e: Exception) {
             Timber.e(e, "💥 TikTok 解析异常")
@@ -216,35 +218,55 @@ class VideoParserRepository @Inject constructor(
     }
 
     // ========================================
-    // 小红书解析
+    // 小红书解析（优化版）
     // ========================================
 
     private suspend fun parseXiaohongshu(url: String): Result<ParsedMedia> {
         Timber.d("📔 准备解析小红书")
 
         return try {
+            // 提取笔记 ID
             val noteIdRegex = "/item/([a-f0-9]+)".toRegex()
-            val noteId = noteIdRegex.find(url)?.groupValues?.get(1)
+            val matchResult = noteIdRegex.find(url)
+            val noteId = matchResult?.groupValues?.get(1)
 
-            if (noteId.isNullOrEmpty()) {
-                return Result.failure(Exception("无法提取小红书笔记 ID"))
+            if (noteId.isNullOrEmpty() || noteId.length < 10) {
+                Timber.w("❌ 无法从 URL 中提取小红书笔记 ID: $url")
+
+                val errorMessage = if (url.contains("xhslink.com")) {
+                    "小红书短链接解析失败\n可能原因：链接已过期或失效\n建议：请使用完整链接"
+                } else {
+                    "无法提取小红书笔记 ID，请检查链接格式"
+                }
+
+                return Result.failure(Exception(errorMessage))
             }
 
             Timber.d("🔑 小红书笔记 ID: $noteId")
 
-            val response = apiService.fetchXiaohongshuNote(
-                noteId = noteId,
-                authorization = "Bearer ${ApiConstants.API_KEY}"
+            EndpointPoller.poll(
+                endpoints = listOf(
+                    "小红书主接口(App)" to suspend {
+                        apiService.fetchXiaohongshuNote(noteId, "Bearer ${ApiConstants.API_KEY}")
+                    },
+                    "小红书备用接口(Web)" to suspend {
+                        apiService.fetchXiaohongshuNoteWeb(noteId, "Bearer ${ApiConstants.API_KEY}")
+                    }
+                ),
+                mapper = { data -> MediaMapper.mapXiaohongshu(data) }
             )
 
-            if (response.code == 200 && response.data != null) {
-                val media = MediaMapper.mapXiaohongshu(response.data)
-                Timber.i("✅ 小红书解析成功: ${media::class.simpleName}")
-                Result.success(media)
-            } else {
-                Result.failure(Exception(response.message ?: "解析失败"))
+        } catch (e: retrofit2.HttpException) {
+            // HTTP 错误特殊处理
+            Timber.e(e, "💥 小红书 HTTP 异常: ${e.code()}")
+            val friendlyMessage = when (e.code()) {
+                400 -> "该笔记无法获取，可能已删除或设置为私密"
+                404 -> "该笔记不存在或已被删除"
+                403 -> "访问被拒绝，该笔记可能设置了隐私保护"
+                500 -> "服务器错误，请稍后重试"
+                else -> "HTTP ${e.code()}: ${e.message()}"
             }
-
+            Result.failure(Exception(friendlyMessage))
         } catch (e: Exception) {
             Timber.e(e, "💥 小红书解析异常")
             Result.failure(e)
@@ -252,7 +274,7 @@ class VideoParserRepository @Inject constructor(
     }
 
     // ========================================
-    // 快手解析
+    // 快手解析（优化版）
     // ========================================
 
     private suspend fun parseKuaishou(url: String): Result<ParsedMedia> {
@@ -266,33 +288,17 @@ class VideoParserRepository @Inject constructor(
 
             Timber.d("🔑 快手视频 ID: $photoId")
 
-            val endpoints = listOf(
-                "主接口(App)" to suspend { apiService.fetchKuaishouVideo(photoId, "Bearer ${ApiConstants.API_KEY}") },
-                "备用接口(Web V2)" to suspend { apiService.fetchKuaishouVideoV2(photoId, "Bearer ${ApiConstants.API_KEY}") }
+            EndpointPoller.poll(
+                endpoints = listOf(
+                    "快手主接口(App)" to suspend {
+                        apiService.fetchKuaishouVideo(photoId, "Bearer ${ApiConstants.API_KEY}")
+                    },
+                    "快手备用接口(Web V2)" to suspend {
+                        apiService.fetchKuaishouVideoV2(photoId, "Bearer ${ApiConstants.API_KEY}")
+                    }
+                ),
+                mapper = { data -> MediaMapper.mapKuaishou(data) }
             )
-
-            for ((index, pair) in endpoints.withIndex()) {
-                val (name, fetch) = pair
-                try {
-                    Timber.d("🔄 尝试 $name (${index + 1}/${endpoints.size})")
-                    val response = fetch()
-
-                    if (response.code == 200 && response.data != null) {
-                        val media = MediaMapper.mapKuaishou(response.data)
-                        Timber.i("✅ 快手解析成功: ${media::class.simpleName}")
-                        return Result.success(media)
-                    }
-
-                    if (index == endpoints.lastIndex) {
-                        return Result.failure(Exception(response.message ?: "所有接口均失败"))
-                    }
-                } catch (e: Exception) {
-                    Timber.e(e, "❌ $name 异常")
-                    if (index == endpoints.lastIndex) return Result.failure(e)
-                }
-            }
-
-            Result.failure(Exception("所有接口均失败"))
 
         } catch (e: Exception) {
             Timber.e(e, "💥 快手解析异常")
@@ -301,7 +307,7 @@ class VideoParserRepository @Inject constructor(
     }
 
     // ========================================
-    // B站解析
+    // B站解析（优化版）
     // ========================================
 
     private suspend fun parseBilibili(url: String): Result<ParsedMedia> {
@@ -315,33 +321,17 @@ class VideoParserRepository @Inject constructor(
 
             Timber.d("🔑 B站 BV号: $bvId")
 
-            val endpoints = listOf(
-                "主接口(Web)" to suspend { apiService.fetchBilibiliVideo(bvId, "Bearer ${ApiConstants.API_KEY}") },
-                "备用接口(App)" to suspend { apiService.fetchBilibiliVideoV2(bvId, "Bearer ${ApiConstants.API_KEY}") }
+            EndpointPoller.poll(
+                endpoints = listOf(
+                    "B站主接口(Web)" to suspend {
+                        apiService.fetchBilibiliVideo(bvId, "Bearer ${ApiConstants.API_KEY}")
+                    },
+                    "B站备用接口(App)" to suspend {
+                        apiService.fetchBilibiliVideoV2(bvId, "Bearer ${ApiConstants.API_KEY}")
+                    }
+                ),
+                mapper = { data -> MediaMapper.mapBilibili(data) }
             )
-
-            for ((index, pair) in endpoints.withIndex()) {
-                val (name, fetch) = pair
-                try {
-                    Timber.d("🔄 尝试 $name (${index + 1}/${endpoints.size})")
-                    val response = fetch()
-
-                    if (response.code == 200 && response.data != null) {
-                        val media = MediaMapper.mapBilibili(response.data)
-                        Timber.i("✅ B站解析成功: ${media::class.simpleName}")
-                        return Result.success(media)
-                    }
-
-                    if (index == endpoints.lastIndex) {
-                        return Result.failure(Exception(response.message ?: "所有接口均失败"))
-                    }
-                } catch (e: Exception) {
-                    Timber.e(e, "❌ $name 异常")
-                    if (index == endpoints.lastIndex) return Result.failure(e)
-                }
-            }
-
-            Result.failure(Exception("所有接口均失败"))
 
         } catch (e: Exception) {
             Timber.e(e, "💥 B站解析异常")
@@ -366,7 +356,7 @@ class VideoParserRepository @Inject constructor(
                 Timber.i("✅ 微博解析成功: ${media::class.simpleName}")
                 Result.success(media)
             } else {
-                Result.failure(Exception(response.message ?: "解析失败"))
+                Result.failure(Exception(response.message))
             }
 
         } catch (e: Exception) {
@@ -394,7 +384,7 @@ class VideoParserRepository @Inject constructor(
                 Timber.i("✅ 西瓜视频解析成功: ${media::class.simpleName}")
                 Result.success(media)
             } else {
-                Result.failure(Exception(response.message ?: "解析失败"))
+                Result.failure(Exception(response.message))
             }
 
         } catch (e: Exception) {
@@ -422,7 +412,7 @@ class VideoParserRepository @Inject constructor(
                 Timber.i("✅ Instagram 解析成功: ${media::class.simpleName}")
                 Result.success(media)
             } else {
-                Result.failure(Exception(response.message ?: "解析失败"))
+                Result.failure(Exception(response.message))
             }
 
         } catch (e: Exception) {
@@ -455,7 +445,7 @@ class VideoParserRepository @Inject constructor(
                 Timber.i("✅ YouTube 解析成功: ${media::class.simpleName}")
                 Result.success(media)
             } else {
-                Result.failure(Exception(response.message ?: "解析失败"))
+                Result.failure(Exception(response.message))
             }
 
         } catch (e: Exception) {
@@ -474,24 +464,90 @@ class VideoParserRepository @Inject constructor(
     private fun extractVideoId(url: String, platform: String): String {
         return when (platform.lowercase()) {
             "douyin" -> {
-                val regex = "video/([0-9]+)".toRegex()
-                regex.find(url)?.groupValues?.get(1) ?: ""
+                // 支持抖音视频和图文笔记两种格式
+                // video格式: https://www.douyin.com/video/7123456789
+                // note格式: https://www.douyin.com/note/7123456789
+                val videoRegex = "(?:video|note)/([0-9]+)".toRegex()
+                videoRegex.find(url)?.groupValues?.get(1) ?: ""
             }
             "tiktok" -> {
                 val regex = "video/([0-9]+)".toRegex()
                 regex.find(url)?.groupValues?.get(1) ?: ""
             }
             "kuaishou" -> {
+                // 支持多种快手URL格式
+                // 1. 短链接: https://v.kuaishou.com/J8J2I2lL
+                // 2. 完整链接: https://www.kuaishou.com/photo/xxxxx
+                // 3. 短视频: https://www.kuaishou.com/short-video/xxxxx
+                // 4. 参数形式: ?photoId=xxxxx
+
+                // 尝试短链接格式 (v.kuaishou.com/xxxxx)
+                val shortLinkRegex = "v\\.kuaishou\\.com/([a-zA-Z0-9_-]+)".toRegex()
+                shortLinkRegex.find(url)?.groupValues?.get(1)?.let { return it }
+
+                Timber.d("🔍 开始提取快手视频ID，原始URL: $url")
+
+                // 🎯 修复1：尝试短视频格式 (/short-video/xxxxx)
+                val shortVideoRegex = "/short-video/([a-zA-Z0-9_-]+)".toRegex()
+                shortVideoRegex.find(url)?.groupValues?.get(1)?.let {
+                    Timber.d("✅ 匹配短视频格式: $it")
+                    return it
+                }
+
+                // 🎯 修复2：尝试photo格式 (/photo/xxxxx)
                 val photoRegex = "/photo/([a-zA-Z0-9_-]+)".toRegex()
-                photoRegex.find(url)?.groupValues?.get(1)
-                    ?: run {
-                        val photoIdRegex = "[?&]photoId=([a-zA-Z0-9_-]+)".toRegex()
-                        photoIdRegex.find(url)?.groupValues?.get(1) ?: ""
-                    }
+                photoRegex.find(url)?.groupValues?.get(1)?.let {
+                    Timber.d("✅ 匹配photo格式: $it")
+                    return it
+                }
+
+                // 🎯 修复3：尝试参数格式 (?photoId=xxxxx 或 &photoId=xxxxx)
+                val photoIdRegex = "[?&]photoId=([a-zA-Z0-9_-]+)".toRegex()
+                photoIdRegex.find(url)?.groupValues?.get(1)?.let {
+                    Timber.d("✅ 匹配参数格式: $it")
+                    return it
+                }
+
+                // 🎯 修复4：尝试 chenzhongtech.com 域名的格式 (/fw/photo/xxxxx)
+                val chenzhongtechRegex = "/fw/photo/([a-zA-Z0-9_-]+)".toRegex()
+                chenzhongtechRegex.find(url)?.groupValues?.get(1)?.let {
+                    Timber.d("✅ 匹配chenzhongtech格式: $it")
+                    return it
+                }
+
+                // 🎯 修复5：尝试从 URL 路径中提取最后一段（通用兜底方案）
+                // 例如：https://www.kuaishou.com/f/X8kQz9w8Abc -> X8kQz9w8Abc
+                val pathSegmentRegex = "/([a-zA-Z0-9_-]{8,})(?:[?#]|$)".toRegex()
+                pathSegmentRegex.find(url)?.groupValues?.get(1)?.let {
+                    Timber.d("✅ 匹配路径段格式: $it")
+                    return it
+                }
+
+                // 如果都不匹配，记录详细日志用于调试
+                Timber.e("❌ 无法从快手URL提取视频ID")
+                Timber.e("原始URL: $url")
+                Timber.e("尝试的格式: 短视频(/short-video/), photo(/photo/), 参数(?photoId=), chenzhongtech(/fw/photo/), 路径段")
+
+                return ""
             }
             "bilibili" -> {
-                val bvRegex = "(BV[a-zA-Z0-9]+)".toRegex()
-                bvRegex.find(url)?.groupValues?.get(1) ?: ""
+                // B站BV号格式：BV + 10位字符（大小写字母和数字）
+                // 支持的URL格式：
+                // 1. https://www.bilibili.com/video/BV1xx411c7mD
+                // 2. https://m.bilibili.com/video/BV1xx411c7mD
+                // 3. https://b23.tv/BV1xx411c7mD (短链接展开后)
+                // 4. https://www.bilibili.com/video/BV1xx411c7mD?p=1 (带参数)
+
+                val bvRegex = "(BV[1-9A-HJ-NP-Za-km-z]{10})".toRegex()
+                val bvId = bvRegex.find(url)?.groupValues?.get(1) ?: ""
+
+                if (bvId.isNotEmpty()) {
+                    Timber.d("✅ 成功提取B站BV号: $bvId")
+                } else {
+                    Timber.w("⚠️ 无法从URL提取BV号: $url")
+                }
+
+                bvId
             }
             else -> ""
         }

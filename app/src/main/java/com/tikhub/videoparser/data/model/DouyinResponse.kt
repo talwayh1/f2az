@@ -130,7 +130,10 @@ data class DouyinUrlContainer(
     val width: Int = 0,
 
     @SerializedName("height")
-    val height: Int = 0
+    val height: Int = 0,
+
+    @SerializedName("data_size")
+    val dataSize: Long = 0  // 文件大小（字节）
 ) {
     /**
      * 获取第一个可用 URL
@@ -149,7 +152,19 @@ data class DouyinBitRate(
     val qualityType: Int = 0,
 
     @SerializedName("play_addr")
-    val playAddr: DouyinUrlContainer? = null
+    val playAddr: DouyinUrlContainer? = null,
+
+    // 🎯 新增：编码格式标识 (0=H.264, 1=H.265/ByteVC1, 2=ByteVC2)
+    @SerializedName("is_bytevc1")
+    val isBytevc1: Int = 0,
+
+    // 🎯 新增：视频编码格式
+    @SerializedName("video_codec_type")
+    val videoCodecType: String? = null,
+
+    // 🎯 新增：FPS（帧率）
+    @SerializedName("FPS")
+    val fps: Int = 0
 )
 
 data class DouyinMusic(

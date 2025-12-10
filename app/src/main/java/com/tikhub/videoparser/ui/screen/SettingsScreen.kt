@@ -4,10 +4,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,6 +33,8 @@ fun SettingsScreen(
     val baseUrl by viewModel.baseUrl.collectAsState()
     val saveSuccess by viewModel.saveSuccess.collectAsState()
     val autoRefreshLog by viewModel.autoRefreshLog.collectAsState()
+    val logServerRunning by viewModel.logServerRunning.collectAsState()
+    val logServerUrl by viewModel.logServerUrl.collectAsState()
 
     var apiKeyInput by remember { mutableStateOf(apiKey) }
     var baseUrlInput by remember { mutableStateOf(baseUrl) }
@@ -50,9 +54,14 @@ fun SettingsScreen(
                 title = { Text("设置") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, "返回")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimary
+                )
             )
         }
     ) { paddingValues ->
@@ -83,7 +92,7 @@ fun SettingsScreen(
                         )
                     }
 
-                    Divider()
+                    HorizontalDivider()
 
                     // API Key 输入
                     OutlinedTextField(
@@ -112,13 +121,33 @@ fun SettingsScreen(
                         label = { Text("API 基础地址") },
                         placeholder = { Text("https://api.tikhub.io/") },
                         modifier = Modifier.fillMaxWidth(),
-                        supportingText = {
-                            Text(
-                                text = "中国大陆用户可使用：https://api.tikhub.dev/",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        },
-                        singleLine = true
+                        singleLine = true,
+                        isError = baseUrlInput.isNotBlank() && !baseUrlInput.matches(Regex("^https?://.*"))
+                    )
+
+                    // 域名快速选择按钮
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { baseUrlInput = "https://api.tikhub.io/" },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("🌍 国际域名")
+                        }
+                        OutlinedButton(
+                            onClick = { baseUrlInput = "https://api.tikhub.dev/" },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("🇨🇳 中国镜像")
+                        }
+                    }
+
+                    Text(
+                        text = "💡 提示：中国大陆用户建议使用中国镜像以获得更快的访问速度",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
                     // 提示文本
@@ -141,16 +170,37 @@ fun SettingsScreen(
                         Text("保存设置")
                     }
 
-                    // 重置按钮
-                    OutlinedButton(
-                        onClick = {
-                            viewModel.resetApiKey()
-                        },
-                        modifier = Modifier.fillMaxWidth()
+                    // 操作按钮行
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(Icons.Default.Refresh, "重置")
-                        Spacer(Modifier.width(8.dp))
-                        Text("重置为默认值")
+                        // 清空按钮
+                        OutlinedButton(
+                            onClick = {
+                                viewModel.clearApiKey()
+                                apiKeyInput = ""
+                                baseUrlInput = ""
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error
+                            )
+                        ) {
+                            Text("清空")
+                        }
+
+                        // 重置按钮
+                        OutlinedButton(
+                            onClick = {
+                                viewModel.resetApiKey()
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.Refresh, "重置", modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("重置默认")
+                        }
                     }
 
                     // 成功提示
@@ -177,7 +227,7 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.titleMedium
                     )
 
-                    Divider()
+                    HorizontalDivider()
 
                     // 自动刷新开关
                     Row(
@@ -207,6 +257,102 @@ fun SettingsScreen(
                 }
             }
 
+            // 远程日志查看
+            Card(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            if (logServerRunning) Icons.Default.Wifi else Icons.Default.WifiOff,
+                            "远程日志",
+                            tint = if (logServerRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "远程日志查看",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                    }
+
+                    HorizontalDivider()
+
+                    // 服务器状态
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "启用远程日志服务器",
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                            Text(
+                                text = "在PC浏览器中实时查看应用日志",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        Switch(
+                            checked = logServerRunning,
+                            onCheckedChange = { enabled ->
+                                if (enabled) {
+                                    viewModel.startLogServer()
+                                } else {
+                                    viewModel.stopLogServer()
+                                }
+                            }
+                        )
+                    }
+
+                    // 显示访问地址
+                    if (logServerRunning && logServerUrl != null) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer
+                            )
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "📱 访问地址",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                Text(
+                                    text = logServerUrl!!,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                )
+                                Text(
+                                    text = "💡 在PC浏览器中打开此地址即可查看日志\n⚠️ 请确保手机和PC在同一WiFi网络下",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                        }
+                    }
+
+                    // 使用说明
+                    Text(
+                        text = "📖 使用说明：\n1. 确保手机和PC连接到同一WiFi网络\n2. 开启远程日志服务器\n3. 在PC浏览器中访问显示的地址\n4. 即可实时查看应用日志",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
             // 关于信息
             Card(
                 modifier = Modifier.fillMaxWidth()
@@ -220,7 +366,7 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.titleMedium
                     )
 
-                    Divider()
+                    HorizontalDivider()
 
                     Text(
                         text = "TikHub 是一个强大的短视频平台数据解析服务，支持抖音、TikTok、小红书、快手等多个平台的视频/图文解析和下载。",

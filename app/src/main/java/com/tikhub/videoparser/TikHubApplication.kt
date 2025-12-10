@@ -3,6 +3,8 @@ package com.tikhub.videoparser
 import android.app.Application
 import android.os.Build
 import android.util.Log
+import androidx.hilt.work.HiltWorkerFactory
+import androidx.work.Configuration
 import com.orhanobut.logger.AndroidLogAdapter
 import com.orhanobut.logger.FormatStrategy
 import com.orhanobut.logger.Logger
@@ -20,12 +22,16 @@ import javax.inject.Inject
 /**
  * TikHub 应用入口
  * 使用 Hilt 进行依赖注入
+ * 实现 Configuration.Provider 以使用 Hilt 的 WorkerFactory
  */
 @HiltAndroidApp
-class TikHubApplication : Application() {
+class TikHubApplication : Application(), Configuration.Provider {
 
     @Inject
     lateinit var logManager: LogManager
+
+    @Inject
+    lateinit var workerFactory: HiltWorkerFactory
 
     override fun onCreate() {
         super.onCreate()
@@ -40,8 +46,11 @@ class TikHubApplication : Application() {
         setupGlobalExceptionHandler()
 
         Timber.i("========================================")
-        Timber.i("TikHub 应用启动")
-        Timber.i("版本: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+        Timber.i("🚀 TikHub VideoParser 应用启动")
+        Timber.i("📦 开发版本: ${BuildConfig.VERSION_NAME}")
+        Timber.i("📱 版本代码: ${BuildConfig.VERSION_CODE}")
+        Timber.i("🔧 构建类型: ${BuildConfig.BUILD_TYPE}")
+        Timber.i("========================================")
         Timber.i("设备: ${Build.MANUFACTURER} ${Build.MODEL}")
         Timber.i("系统: Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
         Timber.i("日志级别: 全量详细日志（开发模式）")
@@ -223,4 +232,14 @@ class TikHubApplication : Application() {
             }
         }
     }
+
+    /**
+     * 配置 WorkManager 使用 Hilt 的 WorkerFactory
+     * 这样 DownloadWorker 就能正确注入依赖了
+     */
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder()
+            .setWorkerFactory(workerFactory)
+            .setMinimumLoggingLevel(if (BuildConfig.DEBUG) Log.DEBUG else Log.INFO)
+            .build()
 }

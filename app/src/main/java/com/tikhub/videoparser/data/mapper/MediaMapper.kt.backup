@@ -1,0 +1,888 @@
+package com.tikhub.videoparser.data.mapper
+
+import com.google.gson.JsonObject
+import com.tikhub.videoparser.data.model.*
+import timber.log.Timber
+
+/**
+ * 数据映射器（Mapper）
+ *
+ * 职责：将各平台的原始 API 响应转换为统一的 ParsedMedia 模型
+ *
+ * 设计原则：
+ * 1. 每个平台一个独立的转换方法
+ * 2. 统一的错误处理和日志记录
+ * 3. 防御性编程：所有字段都考虑 null 情况
+ * 4. 智能判断内容类型（Video vs ImageNote）
+ */
+object MediaMapper {
+
+    // ========================================
+    // 抖音 Mapper
+    // ========================================
+
+    /**
+     * 转换抖音数据
+     *
+     * 特殊逻辑：
+     * - 抖音有"图文笔记"模式（images 字段不为空）
+     * - 优先判断 images，其次才是 video
+     * - 去水印逻辑：将 playwm 替换为 play
+     */
+    fun mapDouyin(data: DouyinVideoData): ParsedMedia {
+        val detail = data.awemeDetail
+
+        // 判断内容类型 - 更严格的验证
+        val imageUrls = detail.images?.mapNotNull { it.getFirstUrl() }?.filter { it.isNotBlank() } ?: emptyList()
+        val hasImages = imageUrls.isNotEmpty()
+
+        val hasVideo = detail.video != null &&
+                      detail.video.playAddr != null &&
+                      detail.video.playAddr.getFirstUrl()?.isNotBlank() == true
+
+        // 构建统计信息
+        val stats = StatsInfo(
+            likeCount = detail.statistics.diggCount,
+            commentCount = detail.statistics.commentCount,
+            shareCount = detail.statistics.shareCount,
+            collectCount = detail.statistics.collectCount,
+            playCount = detail.statistics.playCount
+        )
+
+        // 获取作者头像
+        val authorAvatar = detail.author.avatarThumb?.getFirstUrl() ?: ""
+
+        return if (hasImages) {
+            // 图文笔记模式 - imageUrls 已经过滤验证，确保非空
+            Timber.d("抖音图文笔记：共 ${imageUrls.size} 张图片")
+            ParsedMedia.ImageNote(
+                id = detail.awemeId,
+                platform = "douyin",
+                authorName = detail.author.nickname,
+                authorAvatar = authorAvatar,
+                title = detail.desc ?: "抖音图文",
+                coverUrl = imageUrls.firstOrNull() ?: "",
+                stats = stats,
+                createTime = detail.createTime,
+                shareUrl = detail.shareUrl,
+                imageUrls = imageUrls,
+                imageSizes = detail.images?.map {
+                    ImageSize(it.width, it.height, 0)
+                } ?: emptyList()
+            )
+        } else if (hasVideo) {
+            // 视频模式
+            val video = detail.video!!
+
+            // 🎯 选择最高清晰度的视频 URL（从 bit_rate 列表中选择最高码率）
+            val bestBitRate = video.bitRate?.maxByOrNull { it.bitRate }
+            val playUrl = if (bestBitRate != null && bestBitRate.playAddr != null) {
+                // 使用最高码率的视频 URL
+                bestBitRate.playAddr.getFirstUrl()
+                    ?: video.playAddr!!.getFirstUrl()!! // 降级方案
+            } else {
+                // 没有 bit_rate 数据，使用默认 playAddr
+                video.playAddr!!.getFirstUrl()!!
+            }
+
+            // 验证视频 URL 是否有效
+            if (playUrl.isBlank()) {
+                throw IllegalStateException("抖音视频 URL 为空")
+            }
+
+            // 抖音去水印逻辑：playwm -> play
+            val noWatermarkUrl = if (playUrl.contains("playwm")) {
+                playUrl.replace("playwm", "play")
+            } else {
+                playUrl
+            }
+
+            val selectedBitrate = bestBitRate?.bitRate ?: video.bitRate?.firstOrNull()?.bitRate ?: 0
+            val qualityInfo = bestBitRate?.gearName ?: "默认"
+            Timber.d("抖音视频：时长=${video.duration}ms, 分辨率=${video.width}x${video.height}, 清晰度=$qualityInfo, 码率=$selectedBitrate")
+
+            ParsedMedia.Video(
+                id = detail.awemeId,
+                platform = "douyin",
+                authorName = detail.author.nickname,
+                authorAvatar = authorAvatar,
+                title = detail.desc ?: "抖音视频",
+                coverUrl = video.cover?.getFirstUrl() ?: "",
+                stats = stats,
+                createTime = detail.createTime,
+                shareUrl = detail.shareUrl,
+                videoUrl = noWatermarkUrl,
+                duration = video.duration / 1000, // 毫秒转秒
+                width = video.width,
+                height = video.height,
+                fileSize = 0, // API 未提供
+                bitrate = selectedBitrate,
+                musicUrl = detail.music?.playUrl?.getFirstUrl(),
+                musicTitle = detail.music?.title
+            )
+        } else {
+            throw IllegalStateException("抖音数据解析失败：内容既没有有效图片也没有有效视频 (aweme_id=${detail.awemeId})")
+        }
+    }
+
+    // ========================================
+    // TikTok Mapper
+    // ========================================
+
+    /**
+     * 转换 TikTok 数据
+     *
+     * TikTok 的结构与抖音非常相似
+     */
+    fun mapTikTok(data: TikTokVideoData): ParsedMedia {
+        val detail = data.awemeDetail
+
+        val stats = StatsInfo(
+            likeCount = detail.statistics.diggCount,
+            commentCount = detail.statistics.commentCount,
+            shareCount = detail.statistics.shareCount,
+            collectCount = detail.statistics.collectCount,
+            playCount = detail.statistics.playCount
+        )
+
+        val video = detail.video
+            ?: throw IllegalStateException("TikTok 数据缺少 video 字段")
+
+        // 🎯 选择最高清晰度的视频 URL（从 bit_rate 列表中选择最高码率）
+        val bestBitRate = video.bitRate?.maxByOrNull { it.bitRate }
+        val playUrl = if (bestBitRate != null && bestBitRate.playAddr != null) {
+            // 使用最高码率的视频 URL
+            bestBitRate.playAddr.getFirstUrl()
+                ?: video.playAddr?.getFirstUrl() ?: "" // 降级方案
+        } else {
+            // 没有 bit_rate 数据，使用默认 playAddr
+            video.playAddr?.getFirstUrl() ?: ""
+        }
+
+        // TikTok 去水印逻辑（与抖音相同）
+        val noWatermarkUrl = if (playUrl.contains("playwm")) {
+            playUrl.replace("playwm", "play")
+        } else {
+            playUrl
+        }
+
+        val selectedBitrate = bestBitRate?.bitRate ?: video.bitRate?.firstOrNull()?.bitRate ?: 0
+        val qualityInfo = bestBitRate?.gearName ?: "默认"
+        Timber.d("TikTok视频：时长=${video.duration}ms, 分辨率=${video.width}x${video.height}, 清晰度=$qualityInfo, 码率=$selectedBitrate")
+
+        return ParsedMedia.Video(
+            id = detail.awemeId,
+            platform = "tiktok",
+            authorName = detail.author.nickname,
+            authorAvatar = detail.author.avatarThumb?.getFirstUrl() ?: "",
+            title = detail.desc ?: "TikTok video",
+            coverUrl = video.cover?.getFirstUrl() ?: "",
+            stats = stats,
+            createTime = detail.createTime,
+            shareUrl = detail.shareUrl,
+            videoUrl = noWatermarkUrl,
+            duration = video.duration / 1000,
+            width = video.width,
+            height = video.height,
+            fileSize = 0,
+            bitrate = selectedBitrate,
+            musicUrl = detail.music?.playUrl?.getFirstUrl(),
+            musicTitle = detail.music?.title
+        )
+    }
+
+    // ========================================
+    // 小红书 Mapper
+    // ========================================
+
+    /**
+     * 转换小红书数据
+     *
+     * 特殊逻辑：
+     * - 小红书以图文为主，也支持视频笔记
+     * - 需要从复杂的嵌套结构中提取数据
+     * - 统计数据字段名称与抖音不同
+     */
+    fun mapXiaohongshu(data: XiaohongshuNoteData): ParsedMedia {
+        // 小红书的数据结构：data.data[0].note_list[0]
+        // 更安全的多层级 null 检查
+        val noteDetail = data.data?.firstOrNull()?.noteList?.firstOrNull()
+            ?: throw IllegalStateException("小红书数据结构异常：缺少 note_list (code=${data.code}, success=${data.success}, message=${data.message})")
+
+        // 验证笔记 ID
+        if (noteDetail.id.isNullOrBlank()) {
+            throw IllegalStateException("小红书笔记 ID 为空")
+        }
+
+        // 判断是否为视频笔记，且视频数据有效
+        val isVideo = noteDetail.type == "video" &&
+                      noteDetail.video != null &&
+                      noteDetail.video.url?.isNotBlank() == true
+
+        val stats = StatsInfo(
+            likeCount = noteDetail.likedCount.toLong(),
+            commentCount = noteDetail.commentsCount.toLong(),
+            shareCount = noteDetail.sharedCount.toLong(),
+            collectCount = noteDetail.collectedCount.toLong(),
+            playCount = noteDetail.viewCount.toLong()
+        )
+
+        val authorAvatar = noteDetail.user?.image ?: ""
+        val authorName = noteDetail.user?.nickname
+            ?: noteDetail.user?.name
+            ?: "小红书用户"
+
+        return if (isVideo) {
+            // 视频笔记
+            val video = noteDetail.video!!
+
+            // 🎯 从 urlInfoList 中选择最佳质量（优先 H264 高码率，兼容性更好）
+            val h264Videos = video.urlInfoList
+                ?.filter { it.desc?.contains("h264", ignoreCase = true) == true }
+                ?: emptyList()
+
+            val h265Videos = video.urlInfoList
+                ?.filter { it.desc?.contains("h265", ignoreCase = true) == true }
+                ?: emptyList()
+
+            // 选择最高码率的 H264 视频，如果没有则选择最高码率的 H265
+            val bestH264 = h264Videos.maxByOrNull { it.avgBitrate }
+            val bestH265 = h265Videos.maxByOrNull { it.avgBitrate }
+
+            val bestQuality = bestH264 ?: bestH265 ?: video.urlInfoList?.firstOrNull()
+            val videoUrl = bestQuality?.url
+                ?.takeIf { it.isNotBlank() }
+                ?: video.url
+                ?: throw IllegalStateException("小红书视频 URL 为空 (note_id=${noteDetail.id})")
+
+            if (videoUrl.isBlank()) {
+                throw IllegalStateException("小红书视频 URL 为空字符串 (note_id=${noteDetail.id})")
+            }
+
+            val codecInfo = when {
+                bestH264 != null -> "H264"
+                bestH265 != null -> "H265"
+                else -> "默认"
+            }
+            val bitrateInfo = bestQuality?.avgBitrate ?: video.avgBitrate
+            Timber.d("小红书视频笔记：${noteDetail.id}, 编码=$codecInfo, 码率=$bitrateInfo, 时长=${video.duration}s, 分辨率=${video.width}x${video.height}")
+
+            // 合并标题和描述作为完整文案（更健壮的逻辑）
+            val fullContent = buildString {
+                val titleText = noteDetail.title?.trim()
+                val descText = noteDetail.desc?.trim()
+
+                if (!titleText.isNullOrBlank()) {
+                    append(titleText)
+                }
+
+                if (!descText.isNullOrBlank()) {
+                    if (isNotEmpty() && descText != titleText) {
+                        append("\n\n")
+                    }
+                    if (descText != titleText) {
+                        append(descText)
+                    }
+                }
+
+                if (isEmpty()) {
+                    append("小红书视频笔记")
+                }
+            }
+
+            ParsedMedia.Video(
+                id = noteDetail.id,
+                platform = "xiaohongshu",
+                authorName = authorName,
+                authorAvatar = authorAvatar,
+                title = fullContent,
+                coverUrl = noteDetail.imagesList?.firstOrNull()?.url ?: "",
+                stats = stats,
+                createTime = noteDetail.time,
+                shareUrl = noteDetail.shareInfo?.link,
+                videoUrl = videoUrl,
+                duration = video.duration,
+                width = bestQuality?.width ?: video.width,
+                height = bestQuality?.height ?: video.height,
+                fileSize = 0,
+                bitrate = bitrateInfo.toLong()
+            )
+        } else {
+            // 图文笔记 - 验证图片列表
+            val imagesList = noteDetail.imagesList ?: emptyList()
+
+            // 提取有效的图片 URL（过滤空白和 null）
+            val validImageUrls = imagesList
+                .mapNotNull { it.url ?: it.original }
+                .filter { it.isNotBlank() }
+
+            if (validImageUrls.isEmpty()) {
+                throw IllegalStateException("小红书图文笔记缺少有效图片 (note_id=${noteDetail.id}, type=${noteDetail.type})")
+            }
+
+            // 合并标题和描述作为完整文案
+            val fullContent = buildString {
+                val titleText = noteDetail.title?.trim()
+                val descText = noteDetail.desc?.trim()
+
+                if (!titleText.isNullOrBlank()) {
+                    append(titleText)
+                }
+
+                if (!descText.isNullOrBlank()) {
+                    if (isNotEmpty() && descText != titleText) {
+                        append("\n\n")
+                    }
+                    if (descText != titleText) {
+                        append(descText)
+                    }
+                }
+
+                if (isEmpty()) {
+                    append("小红书图文笔记")
+                }
+            }
+
+            Timber.d("小红书图文笔记：${noteDetail.id}, 共 ${validImageUrls.size} 张图片")
+
+            ParsedMedia.ImageNote(
+                id = noteDetail.id,
+                platform = "xiaohongshu",
+                authorName = authorName,
+                authorAvatar = authorAvatar,
+                title = fullContent,
+                coverUrl = validImageUrls.firstOrNull() ?: "",
+                stats = stats,
+                createTime = noteDetail.time ?: 0,
+                shareUrl = noteDetail.shareInfo?.link,
+                imageUrls = validImageUrls,
+                imageSizes = imagesList.map {
+                    ImageSize(it.width ?: 0, it.height ?: 0, 0)
+                }
+            )
+        }
+    }
+
+    // ========================================
+    // 快手 Mapper
+    // ========================================
+
+    /**
+     * 转换快手数据
+     */
+    fun mapKuaishou(data: KuaishouVideoData): ParsedMedia {
+        Timber.d("开始解析快手视频数据")
+
+        try {
+            val photo = data.photo
+            Timber.d("快手视频基础信息 - ID: ${photo.photoId}, 标题: ${photo.caption}")
+
+            val stats = StatsInfo(
+                likeCount = photo.likeCount,
+                commentCount = photo.commentCount,
+                shareCount = photo.shareCount,
+                collectCount = 0,
+                playCount = photo.viewCount
+            )
+
+            // 🎯 从 mainMvUrls 中选择最高质量的视频
+            // 快手的 quality_tag 通常有: "normal", "super", "hd" 等
+            // 优先级: hd > super > normal
+            val videoUrls = photo.mainMvUrls
+
+            // 详细的日志记录用于调试
+            when {
+                videoUrls == null -> {
+                    Timber.e("快手视频解析失败: mainMvUrls 为 null")
+                    throw IllegalStateException("快手视频 URL 列表为空")
+                }
+                videoUrls.isEmpty() -> {
+                    Timber.e("快手视频解析失败: mainMvUrls 为空列表")
+                    Timber.e("可用数据: photoId=${photo.photoId}, caption=${photo.caption}")
+                    throw IllegalStateException("快手视频 URL 列表为空")
+                }
+                else -> {
+                    Timber.d("快手视频可用 URL 数量: ${videoUrls.size}")
+                    videoUrls.forEachIndexed { index, url ->
+                        Timber.d("视频 URL $index: quality=${url.qualityTag}, url=${url.url}")
+                    }
+                }
+            }
+
+            val videoUrl = when {
+                // 优先选择 HD 质量
+                videoUrls.any { it.qualityTag?.contains("hd", ignoreCase = true) == true } -> {
+                    val hdUrl = videoUrls.first { it.qualityTag?.contains("hd", ignoreCase = true) == true }
+                    Timber.d("快手视频：选择 HD 质量")
+                    hdUrl.url ?: run {
+                        Timber.e("快手 HD 视频质量标签存在但 URL 为空")
+                        throw IllegalStateException("快手 HD 视频 URL 为空")
+                    }
+                }
+
+                // 其次选择 Super 质量
+                videoUrls.any { it.qualityTag?.contains("super", ignoreCase = true) == true } -> {
+                    val superUrl = videoUrls.first { it.qualityTag?.contains("super", ignoreCase = true) == true }
+                    Timber.d("快手视频：选择 Super 质量")
+                    superUrl.url ?: run {
+                        Timber.e("快手 Super 视频质量标签存在但 URL 为空")
+                        throw IllegalStateException("快手 Super 视频 URL 为空")
+                    }
+                }
+
+                // 降级到第一个可用URL
+                else -> {
+                    val firstUrl = videoUrls.first()
+                    Timber.d("快手视频：使用默认质量 (quality=${firstUrl.qualityTag})")
+                    firstUrl.url ?: run {
+                        Timber.e("快手默认视频 URL 为空，qualityTag=${firstUrl.qualityTag}")
+                        throw IllegalStateException("快手视频 URL 为空")
+                    }
+                }
+            }
+
+        val result = ParsedMedia.Video(
+                id = photo.photoId,
+                platform = "kuaishou",
+                authorName = photo.userInfo.userName,
+                authorAvatar = photo.userInfo.headUrl ?: "",
+                title = photo.caption ?: "快手视频",
+                coverUrl = photo.coverUrls?.firstOrNull()?.url ?: "",
+                stats = stats,
+                createTime = photo.timestamp,
+                shareUrl = photo.shareInfo?.shareUrl,
+                videoUrl = videoUrl,
+                duration = photo.duration / 1000,
+                width = photo.width,
+                height = photo.height,
+                fileSize = 0,
+                bitrate = 0
+            )
+
+            Timber.d("快手视频解析成功: ${result.title}")
+            return result
+
+        } catch (e: Exception) {
+            Timber.e(e, "快手视频数据映射失败")
+            // 记录更详细的错误信息用于调试
+            Timber.e("错误详情: ${e.message}")
+            Timber.e("数据结构: { photoId: ${data.photo.photoId}, caption: ${data.photo.caption} }")
+            throw e
+        }
+    }
+
+    // ========================================
+    // B站 Mapper
+    // ========================================
+
+    /**
+     * 转换 B站 数据
+     */
+    fun mapBilibili(data: BilibiliVideoData): ParsedMedia {
+        val videoData = data.data
+            ?: throw IllegalStateException("B站数据缺少 data 字段")
+
+        val stats = StatsInfo(
+            likeCount = videoData.stat?.like?.toLong() ?: 0,
+            commentCount = videoData.stat?.reply?.toLong() ?: 0,
+            shareCount = videoData.stat?.share?.toLong() ?: 0,
+            collectCount = videoData.stat?.favorite?.toLong() ?: 0,
+            playCount = videoData.stat?.view?.toLong() ?: 0
+        )
+
+        // 注意：B站的视频播放地址需要额外的 API 调用获取
+        // 这里仅保存基础信息，实际播放地址需要通过 cid 和 bvid 获取
+        return ParsedMedia.Video(
+            id = videoData.bvid ?: videoData.aid?.toString() ?: "",
+            platform = "bilibili",
+            authorName = videoData.owner?.name ?: "B站用户",
+            authorAvatar = videoData.owner?.face ?: "",
+            title = videoData.title ?: "B站视频",
+            coverUrl = videoData.pic ?: "",
+            stats = stats,
+            createTime = videoData.ctime,
+            shareUrl = "https://www.bilibili.com/video/${videoData.bvid}",
+            videoUrl = "", // B站需要额外 API 获取真实播放地址
+            duration = videoData.duration,
+            width = videoData.dimension?.width ?: 0,
+            height = videoData.dimension?.height ?: 0,
+            fileSize = 0,
+            bitrate = 0
+        )
+    }
+
+    // ========================================
+    // 微博 Mapper（新增）
+    // ========================================
+
+    /**
+     * 转换微博数据
+     *
+     * 微博特殊性：
+     * - 支持视频微博和九宫格图文微博
+     * - 通过 page_info.type 判断是否为视频
+     * - 图文微博通过 pics 字段获取图片列表
+     */
+    fun mapWeibo(json: JsonObject): ParsedMedia {
+        Timber.d("开始解析微博数据")
+
+        // 微博 API 返回的 status 对象
+        val status = json.getAsJsonObject("status")
+            ?: throw IllegalStateException("微博数据缺少 status 字段")
+
+        val user = status.getAsJsonObject("user")
+        val pageInfo = status.getAsJsonObject("page_info")
+
+        // 判断是否为视频微博
+        val isVideo = pageInfo != null &&
+                pageInfo.get("type")?.asString == "video" &&
+                pageInfo.getAsJsonObject("media_info") != null
+
+        // 构建统计信息
+        val stats = StatsInfo(
+            likeCount = status.get("attitudes_count")?.asLong ?: 0,
+            commentCount = status.get("comments_count")?.asLong ?: 0,
+            shareCount = status.get("reposts_count")?.asLong ?: 0,
+            collectCount = 0,
+            playCount = 0
+        )
+
+        val authorName = user?.get("screen_name")?.asString ?: "微博用户"
+        val authorAvatar = user?.get("avatar_large")?.asString ?: ""
+        val title = status.get("text_raw")?.asString ?: "微博内容"
+        val id = status.get("id")?.asString ?: ""
+
+        return if (isVideo) {
+            // 视频微博
+            val mediaInfo = pageInfo.getAsJsonObject("media_info")
+            val videoUrl = mediaInfo.get("stream_url_hd")?.asString
+                ?: mediaInfo.get("stream_url")?.asString
+                ?: throw IllegalStateException("微博视频 URL 为空")
+
+            val coverUrl = pageInfo.getAsJsonObject("page_pic")?.get("url")?.asString ?: ""
+
+            ParsedMedia.Video(
+                id = id,
+                platform = "weibo",
+                authorName = authorName,
+                authorAvatar = authorAvatar,
+                title = title,
+                coverUrl = coverUrl,
+                stats = stats,
+                createTime = status.get("created_at")?.asLong ?: 0,
+                shareUrl = null,
+                videoUrl = videoUrl,
+                duration = mediaInfo.get("duration")?.asInt ?: 0,
+                width = 0,
+                height = 0,
+                fileSize = 0,
+                bitrate = 0
+            )
+        } else {
+            // 图文微博（九宫格）
+            val pics = status.getAsJsonArray("pics")
+            if (pics == null || pics.size() == 0) {
+                throw IllegalStateException("微博图文内容缺少图片")
+            }
+
+            val imageUrls = mutableListOf<String>()
+            for (i in 0 until pics.size()) {
+                val pic = pics[i].asJsonObject
+                val large = pic.getAsJsonObject("large")
+                val url = large?.get("url")?.asString
+                if (url != null) {
+                    imageUrls.add(url)
+                }
+            }
+
+            ParsedMedia.ImageNote(
+                id = id,
+                platform = "weibo",
+                authorName = authorName,
+                authorAvatar = authorAvatar,
+                title = title,
+                coverUrl = imageUrls.firstOrNull() ?: "",
+                stats = stats,
+                createTime = status.get("created_at")?.asLong ?: 0,
+                shareUrl = null,
+                imageUrls = imageUrls,
+                imageSizes = null
+            )
+        }
+    }
+
+    // ========================================
+    // 西瓜视频 Mapper（新增）
+    // ========================================
+
+    /**
+     * 转换西瓜视频数据
+     *
+     * 西瓜视频特点：
+     * - 以横屏视频为主
+     * - 数据结构与抖音相似（同属字节跳动）
+     */
+    fun mapXigua(data: XiguaVideoData): ParsedMedia {
+        Timber.d("开始解析西瓜视频数据")
+
+        val itemInfo = data.itemInfo
+
+        val stats = StatsInfo(
+            likeCount = itemInfo.stats.diggCount,
+            commentCount = itemInfo.stats.commentCount,
+            shareCount = itemInfo.stats.shareCount,
+            collectCount = 0,
+            playCount = itemInfo.stats.playCount
+        )
+
+        // 🎯 优先选择 download_addr（通常质量更高），然后是 play_addr
+        val downloadUrls = itemInfo.video.downloadAddr?.urlList ?: emptyList()
+        val playUrls = itemInfo.video.playAddr?.urlList ?: emptyList()
+
+        val videoUrl = when {
+            downloadUrls.isNotEmpty() -> {
+                Timber.d("西瓜视频：使用 download_addr (高质量)")
+                downloadUrls.first()
+            }
+            playUrls.isNotEmpty() -> {
+                Timber.d("西瓜视频：使用 play_addr (标准质量)")
+                playUrls.first()
+            }
+            else -> throw IllegalStateException("西瓜视频 URL 为空")
+        }
+
+        val coverUrl = itemInfo.video.cover?.urlList?.firstOrNull() ?: ""
+
+        return ParsedMedia.Video(
+            id = itemInfo.itemId,
+            platform = "xigua",
+            authorName = itemInfo.author.name,
+            authorAvatar = itemInfo.author.avatarUrl ?: "",
+            title = itemInfo.title ?: itemInfo.desc ?: "西瓜视频",
+            coverUrl = coverUrl,
+            stats = stats,
+            createTime = itemInfo.createTime,
+            shareUrl = itemInfo.shareUrl,
+            videoUrl = videoUrl,
+            duration = itemInfo.video.duration / 1000,
+            width = itemInfo.video.width,
+            height = itemInfo.video.height,
+            fileSize = 0,
+            bitrate = 0
+        )
+    }
+
+    // ========================================
+    // Instagram Mapper（新增）
+    // ========================================
+
+    /**
+     * 转换 Instagram 数据
+     *
+     * Instagram 特点：
+     * - 支持单图、单视频、轮播（Carousel）
+     * - media_type: 1=图片, 2=视频, 8=轮播
+     * - 轮播可能包含图片和视频的混合
+     */
+    fun mapInstagram(data: InstagramPostData): ParsedMedia {
+        Timber.d("开始解析 Instagram 数据")
+
+        val item = data.items?.firstOrNull()
+            ?: throw IllegalStateException("Instagram 数据缺少 items")
+
+        val stats = StatsInfo(
+            likeCount = item.likeCount,
+            commentCount = item.commentCount,
+            shareCount = 0,
+            collectCount = 0,
+            playCount = item.playCount
+        )
+
+        val authorName = item.user.username
+        val authorAvatar = item.user.profilePicUrl ?: ""
+        val title = item.caption?.text ?: "Instagram post"
+        val id = item.id
+
+        return when (item.mediaType) {
+            1 -> {
+                // 单图 - 🎯 选择最高分辨率
+                val bestImage = item.imageVersions?.candidates?.maxByOrNull { it.width * it.height }
+                val imageUrl = bestImage?.url
+                    ?: throw IllegalStateException("Instagram 图片 URL 为空")
+
+                Timber.d("Instagram图片：选择最高分辨率 ${bestImage.width}x${bestImage.height}")
+
+                ParsedMedia.ImageNote(
+                    id = id,
+                    platform = "instagram",
+                    authorName = authorName,
+                    authorAvatar = authorAvatar,
+                    title = title,
+                    coverUrl = imageUrl,
+                    stats = stats,
+                    createTime = item.takenAt,
+                    shareUrl = "https://www.instagram.com/p/${item.code}/",
+                    imageUrls = listOf(imageUrl),
+                    imageSizes = item.imageVersions?.candidates?.map {
+                        ImageSize(it.width, it.height, 0)
+                    }
+                )
+            }
+            2 -> {
+                // 单视频 - 🎯 选择最高分辨率
+                val bestVideo = item.videoVersions?.maxByOrNull { it.width * it.height }
+                val videoUrl = bestVideo?.url
+                    ?: throw IllegalStateException("Instagram 视频 URL 为空")
+
+                val coverImage = item.imageVersions?.candidates?.maxByOrNull { it.width * it.height }
+                val coverUrl = coverImage?.url ?: ""
+
+                Timber.d("Instagram视频：选择最高分辨率 ${bestVideo.width}x${bestVideo.height}")
+
+                ParsedMedia.Video(
+                    id = id,
+                    platform = "instagram",
+                    authorName = authorName,
+                    authorAvatar = authorAvatar,
+                    title = title,
+                    coverUrl = coverUrl,
+                    stats = stats,
+                    createTime = item.takenAt,
+                    shareUrl = "https://www.instagram.com/p/${item.code}/",
+                    videoUrl = videoUrl,
+                    duration = 0, // Instagram API 可能不提供
+                    width = bestVideo.width,
+                    height = bestVideo.height,
+                    fileSize = 0,
+                    bitrate = 0
+                )
+            }
+            8 -> {
+                // 轮播（Carousel）- 🎯 提取所有图片并选择最高分辨率
+                val carouselMedia = item.carouselMedia
+                    ?: throw IllegalStateException("Instagram 轮播数据为空")
+
+                val imageUrls = mutableListOf<String>()
+                val imageSizes = mutableListOf<ImageSize>()
+
+                for (media in carouselMedia) {
+                    if (media.mediaType == 1 || media.mediaType == 8) {
+                        // 图片 - 选择最高分辨率
+                        val bestImage = media.imageVersions?.candidates?.maxByOrNull { it.width * it.height }
+                        if (bestImage != null) {
+                            imageUrls.add(bestImage.url)
+                            imageSizes.add(ImageSize(bestImage.width, bestImage.height, 0))
+                            Timber.d("Instagram轮播图片：${bestImage.width}x${bestImage.height}")
+                        }
+                    }
+                    // 注意：如果轮播中包含视频，这里暂时忽略
+                }
+
+                if (imageUrls.isEmpty()) {
+                    throw IllegalStateException("Instagram 轮播中没有可用图片")
+                }
+
+                ParsedMedia.ImageNote(
+                    id = id,
+                    platform = "instagram",
+                    authorName = authorName,
+                    authorAvatar = authorAvatar,
+                    title = title,
+                    coverUrl = imageUrls.firstOrNull() ?: "",
+                    stats = stats,
+                    createTime = item.takenAt,
+                    shareUrl = "https://www.instagram.com/p/${item.code}/",
+                    imageUrls = imageUrls,
+                    imageSizes = imageSizes
+                )
+            }
+            else -> {
+                throw IllegalStateException("不支持的 Instagram 媒体类型: ${item.mediaType}")
+            }
+        }
+    }
+
+    // ========================================
+    // YouTube Mapper（新增）
+    // ========================================
+
+    /**
+     * 转换 YouTube 数据
+     *
+     * YouTube 特点：
+     * - 长视频为主
+     * - 有多种清晰度的视频流
+     * - 需要从 formats 中选择最佳质量
+     */
+    fun mapYouTube(data: YouTubeVideoData): ParsedMedia {
+        Timber.d("开始解析 YouTube 数据")
+
+        val videoDetails = data.videoDetails
+
+        val stats = StatsInfo(
+            likeCount = 0, // YouTube API 可能不提供点赞数
+            commentCount = 0,
+            shareCount = 0,
+            collectCount = 0,
+            playCount = videoDetails.viewCount
+        )
+
+        // 从 formats 中选择最高质量的视频
+        val formats = data.streamingData?.formats ?: emptyList()
+        val adaptiveFormats = data.streamingData?.adaptiveFormats ?: emptyList()
+
+        // 优先选择包含音视频的 formats
+        val videoUrl = formats.maxByOrNull { it.bitrate }?.url
+            ?: adaptiveFormats.filter { it.mimeType?.contains("video") == true }
+                .maxByOrNull { it.bitrate }?.url
+            ?: throw IllegalStateException("YouTube 视频 URL 为空")
+
+        val coverUrl = videoDetails.thumbnail?.thumbnails?.maxByOrNull { it.width * it.height }?.url ?: ""
+
+        // 获取视频分辨率
+        val bestFormat = formats.maxByOrNull { it.width * it.height }
+            ?: adaptiveFormats.filter { it.mimeType?.contains("video") == true }
+                .maxByOrNull { it.width * it.height }
+
+        return ParsedMedia.Video(
+            id = videoDetails.videoId,
+            platform = "youtube",
+            authorName = videoDetails.author ?: "YouTube Creator",
+            authorAvatar = "", // YouTube API 可能不直接提供频道头像
+            title = videoDetails.title ?: "YouTube Video",
+            coverUrl = coverUrl,
+            stats = stats,
+            createTime = 0, // YouTube API 可能不提供
+            shareUrl = "https://www.youtube.com/watch?v=${videoDetails.videoId}",
+            videoUrl = videoUrl,
+            duration = videoDetails.lengthSeconds,
+            width = bestFormat?.width ?: 0,
+            height = bestFormat?.height ?: 0,
+            fileSize = bestFormat?.contentLength ?: 0,
+            bitrate = bestFormat?.bitrate?.toLong() ?: 0
+        )
+    }
+
+    // ========================================
+    // 通用错误处理
+    // ========================================
+
+    /**
+     * 安全转换（带错误处理）
+     */
+    fun <T> safeMap(
+        data: T,
+        mapper: (T) -> ParsedMedia,
+        platform: String
+    ): Result<ParsedMedia> {
+        return try {
+            Timber.d("开始转换 $platform 数据")
+            val result = mapper(data)
+            Timber.i("✅ $platform 数据转换成功")
+            Result.success(result)
+        } catch (e: Exception) {
+            Timber.e(e, "❌ $platform 数据转换失败")
+            Result.failure(e)
+        }
+    }
+}

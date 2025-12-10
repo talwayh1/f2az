@@ -48,7 +48,13 @@ sealed class ParsedMedia {
         val fileSize: Long = 0,            // 文件大小（字节）
         val bitrate: Long = 0,             // 码率（bps）
         val musicUrl: String? = null,      // 背景音乐链接（可选）
-        val musicTitle: String? = null     // 音乐标题（可选）
+        val musicTitle: String? = null,    // 音乐标题（可选）
+
+        // 🎯 新增：视频编码技术信息
+        val codecType: String? = null,     // 编码格式：H.264, H.265, ByteVC2 等
+        val fps: Int = 0,                  // 帧率（fps）
+        val qualityTag: String? = null,    // 画质标签：4K, 1080P, 720P 等
+        val videoSource: String? = null    // 视频来源：bit_rate_list, download_addr, play_addr
     ) : ParsedMedia() {
 
         /**
@@ -83,6 +89,118 @@ sealed class ParsedMedia {
             val seconds = duration % 60
             return String.format(Locale.US, "%02d:%02d", minutes, seconds)
         }
+
+        /**
+         * 获取码率的可读格式
+         */
+        fun getReadableBitrate(): String {
+            return when {
+                bitrate < 1000 -> "$bitrate bps"
+                bitrate < 1_000_000 -> String.format(Locale.US, "%.1f Kbps", bitrate / 1000.0)
+                else -> String.format(Locale.US, "%.1f Mbps", bitrate / 1_000_000.0)
+            }
+        }
+
+        /**
+         * 获取视频清晰度描述
+         */
+        fun getQualityDescription(): String {
+            val pixels = width * height
+            return when {
+                pixels >= 3840 * 2160 -> "4K超清"
+                pixels >= 2560 * 1440 -> "2K超清"
+                pixels >= 1920 * 1080 -> "1080P高清"
+                pixels >= 1280 * 720 -> "720P高清"
+                pixels >= 854 * 480 -> "480P标清"
+                else -> "流畅"
+            }
+        }
+
+        /**
+         * 获取分辨率描述
+         */
+        fun getResolutionDescription(): String {
+            return if (width > 0 && height > 0) {
+                "${width}x${height}"
+            } else {
+                "未知"
+            }
+        }
+
+        /**
+         * 获取预估帧率（基于码率和分辨率）
+         */
+        fun getEstimatedFPS(): String {
+            // 如果有实际 FPS 数据,优先使用
+            if (fps > 0) {
+                return "$fps fps"
+            }
+
+            // 简单估算：对于移动端视频，通常是24-60fps
+            // 高码率且高分辨率 -> 可能是60fps
+            // 中等 -> 30fps
+            // 低 -> 24fps
+            return when {
+                bitrate > 10_000_000 && width >= 1920 -> "60 fps"
+                bitrate > 5_000_000 -> "30 fps"
+                else -> "24 fps"
+            }
+        }
+
+        /**
+         * 获取编码格式描述
+         */
+        fun getCodecDescription(): String {
+            return codecType ?: "未知编码"
+        }
+
+        /**
+         * 获取完整的技术信息描述
+         * 格式: "H.264 · 720P · 2.1 Mbps · 30fps"
+         */
+        fun getTechnicalInfo(): String {
+            val parts = mutableListOf<String>()
+
+            // 编码格式
+            if (!codecType.isNullOrBlank()) {
+                parts.add(codecType)
+            }
+
+            // 画质标签
+            if (!qualityTag.isNullOrBlank()) {
+                parts.add(qualityTag)
+            } else {
+                // 如果没有画质标签,使用分辨率
+                val quality = getQualityDescription()
+                if (quality != "流畅") {
+                    parts.add(quality)
+                }
+            }
+
+            // 码率
+            if (bitrate > 0) {
+                parts.add(getReadableBitrate())
+            }
+
+            // 帧率
+            if (fps > 0) {
+                parts.add("${fps}fps")
+            }
+
+            return parts.joinToString(" · ")
+        }
+
+        /**
+         * 获取视频来源描述
+         */
+        fun getSourceDescription(): String {
+            return when (videoSource) {
+                "bit_rate_list" -> "高清源"
+                "download_addr" -> "标准源"
+                "play_addr" -> "播放源"
+                else -> "未知来源"
+            }
+        }
     }
 
     /**
@@ -102,7 +220,10 @@ sealed class ParsedMedia {
 
         // 图文特有属性
         val imageUrls: List<String>,       // 无水印图片列表（原图）
-        val imageSizes: List<ImageSize>? = null  // 图片尺寸信息（可选）
+        val imageSizes: List<ImageSize>? = null,  // 图片尺寸信息（可选）
+
+        // 🎯 新增：Live Photo 支持（小红书特有功能）
+        val livePhotos: List<LivePhotoInfo>? = null  // Live Photo 实况视频列表
     ) : ParsedMedia() {
 
         /**
@@ -121,6 +242,33 @@ sealed class ParsedMedia {
          * 是否是多图笔记
          */
         fun isMultipleImages(): Boolean = imageUrls.size > 1
+
+        /**
+         * 获取第一张图片的信息描述
+         */
+        fun getFirstImageInfo(): String? {
+            val firstSize = imageSizes?.firstOrNull() ?: return null
+            val resolution = "${firstSize.width}x${firstSize.height}"
+            val size = when {
+                firstSize.fileSize < 1024 -> "${firstSize.fileSize} B"
+                firstSize.fileSize < 1024 * 1024 -> String.format(Locale.US, "%.1f KB", firstSize.fileSize / 1024.0)
+                else -> String.format(Locale.US, "%.1f MB", firstSize.fileSize / (1024.0 * 1024))
+            }
+            return "$resolution · $size"
+        }
+
+        /**
+         * 获取所有图片的总大小
+         */
+        fun getTotalImageSize(): String {
+            val totalBytes = imageSizes?.sumOf { it.fileSize } ?: 0
+            return when {
+                totalBytes < 1024 -> "$totalBytes B"
+                totalBytes < 1024 * 1024 -> String.format(Locale.US, "%.1f KB", totalBytes / 1024.0)
+                totalBytes < 1024 * 1024 * 1024 -> String.format(Locale.US, "%.1f MB", totalBytes / (1024.0 * 1024))
+                else -> String.format(Locale.US, "%.1f GB", totalBytes / (1024.0 * 1024 * 1024))
+            }
+        }
     }
 }
 
@@ -171,6 +319,18 @@ data class ImageSize(
     val width: Int,
     val height: Int,
     val fileSize: Long = 0  // 字节
+)
+
+/**
+ * Live Photo 信息（小红书特有功能）
+ * Live Photo = 静态图片 + 短视频动画
+ */
+data class LivePhotoInfo(
+    val imageIndex: Int,           // 对应的图片索引
+    val videoUrl: String,          // Live Photo 视频 URL
+    val duration: Int = 0,         // 时长（毫秒）
+    val width: Int = 0,            // 宽度
+    val height: Int = 0            // 高度
 )
 
 /**

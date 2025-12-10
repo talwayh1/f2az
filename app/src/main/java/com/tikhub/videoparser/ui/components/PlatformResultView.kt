@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Comment
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -51,7 +52,6 @@ fun PlatformResultView(
     onDismiss: () -> Unit
 ) {
     val downloadState by viewModel.downloadState.collectAsStateWithLifecycle()
-    val coroutineScope = rememberCoroutineScope()
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -106,8 +106,8 @@ fun PlatformResultView(
                         onDownloadImages = { urls ->
                             viewModel.downloadAllImages(urls)
                         },
-                        onDownloadSingleImage = { url ->
-                            viewModel.downloadImage(url)
+                        onDownloadSingleImage = { _ ->
+                            // 单张图片下载功能暂未实现
                         }
                     )
                 }
@@ -159,7 +159,7 @@ private fun PlatformHeader(platform: Platform, onClose: () -> Unit) {
  * 作者信息卡片
  */
 @Composable
-private fun AuthorInfoCard(author: com.tikhub.videoparser.data.model.AuthorInfo?, platform: Platform) {
+private fun AuthorInfoCard(author: com.tikhub.videoparser.data.model.AuthorInfo?, @Suppress("UNUSED_PARAMETER") platform: Platform) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -223,7 +223,7 @@ private fun AuthorInfoCard(author: com.tikhub.videoparser.data.model.AuthorInfo?
 @Composable
 private fun ContentDisplayCard(
     result: ParseResult,
-    platform: Platform,
+    @Suppress("UNUSED_PARAMETER") platform: Platform,
     viewModel: MainViewModel
 ) {
     Card(
@@ -263,7 +263,7 @@ private fun ContentDisplayCard(
 @Composable
 private fun VideoContentView(
     video: com.tikhub.videoparser.data.model.VideoInfo,
-    viewModel: MainViewModel
+    @Suppress("UNUSED_PARAMETER") viewModel: MainViewModel
 ) {
     val context = LocalContext.current
     var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
@@ -354,7 +354,7 @@ private fun ImageGalleryView(images: List<com.tikhub.videoparser.data.model.Imag
  * 详细信息卡片
  */
 @Composable
-private fun DetailInfoCard(result: ParseResult, platform: Platform) {
+private fun DetailInfoCard(result: ParseResult, @Suppress("UNUSED_PARAMETER") platform: Platform) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -372,7 +372,7 @@ private fun DetailInfoCard(result: ParseResult, platform: Platform) {
 
             // 分享链接
             if (!result.shareUrl.isNullOrBlank()) {
-                InfoRow("分享链接", result.shareUrl!!, Icons.Default.Link)
+                InfoRow("分享链接", result.shareUrl, Icons.Default.Link)
             }
 
             // 创建时间
@@ -423,7 +423,7 @@ private fun StatisticsCard(statistics: com.tikhub.videoparser.data.model.Statist
                     StatItem(Icons.Default.Favorite, "点赞", statistics.likeCount)
                 }
                 item {
-                    StatItem(Icons.Default.Comment, "评论", statistics.commentCount)
+                    StatItem(Icons.AutoMirrored.Filled.Comment, "评论", statistics.commentCount)
                 }
                 item {
                     StatItem(Icons.Default.Share, "分享", statistics.shareCount)
@@ -479,7 +479,7 @@ private fun VideoParametersCard(video: com.tikhub.videoparser.data.model.VideoIn
 @Composable
 private fun DownloadActionCard(
     result: ParseResult,
-    platform: Platform,
+    @Suppress("UNUSED_PARAMETER") platform: Platform,
     downloadState: com.tikhub.videoparser.download.DownloadState,
     onDownloadVideo: (String) -> Unit,
     onDownloadImages: (List<String>) -> Unit,
@@ -532,9 +532,9 @@ private fun DownloadActionCard(
                     }
 
                     // 批量下载
-                    if (result.images!!.size > 3) {
+                    if (result.images.size > 3) {
                         Button(
-                            onClick = { onDownloadImages(result.images!!.map { it.url }) },
+                            onClick = { onDownloadImages(result.images.map { it.url }) },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(top = 8.dp),
@@ -542,7 +542,7 @@ private fun DownloadActionCard(
                         ) {
                             Icon(Icons.Default.Download, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("保存全部 ${result.images!!.size} 张图片")
+                            Text("保存全部 ${result.images.size} 张图片")
                         }
                     }
                 }
@@ -552,7 +552,7 @@ private fun DownloadActionCard(
             when (downloadState) {
                 is com.tikhub.videoparser.download.DownloadState.Downloading -> {
                     LinearProgressIndicator(
-                        progress = (downloadState.progress / 100f),
+                        progress = { downloadState.progress / 100f },
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = 8.dp)

@@ -17,6 +17,12 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
 
+    <!-- 下载相关权限 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <application
         android:name=".TikHubApplication"
         android:allowBackup="true"
@@ -51,6 +57,43 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- 禁用 WorkManager 默认初始化，改用 Hilt 配置 -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
+
+        <!-- 下载取消广播接收器 -->
+        <receiver
+            android:name=".download.DownloadCancelReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.tikhub.videoparser.ACTION_CANCEL_DOWNLOAD" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 转码取消广播接收器 -->
+        <receiver
+            android:name=".download.TranscodeCancelReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.tikhub.videoparser.ACTION_CANCEL_TRANSCODE" />
+            </intent-filter>
+        </receiver>
+
+        <!-- WorkManager 前台服务声明（用于长时间下载任务） -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false"
+            tools:node="merge" />
     </application>
 
 </manifest>

@@ -14,6 +14,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,12 +25,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tikhub.videoparser.data.model.ParsedMedia
+import com.tikhub.videoparser.data.preferences.SettingsManager
+import com.tikhub.videoparser.download.DownloadState
 import com.tikhub.videoparser.ui.compose.MediaResultCard
+import com.tikhub.videoparser.ui.screen.LogsScreen
+import com.tikhub.videoparser.ui.screen.SettingsScreen
 import com.tikhub.videoparser.ui.theme.TikHubVideoParserTheme
 import com.tikhub.videoparser.ui.viewmodel.VideoParserViewModel
-import com.tikhub.videoparser.utils.DownloadHelper
+import com.tikhub.videoparser.download.WorkManagerDownloadManager
+import com.tikhub.videoparser.utils.Platform
 import dagger.hilt.android.AndroidEntryPoint
 import timber.log.Timber
+import javax.inject.Inject
 
 /**
  * 主界面 Activity
@@ -45,6 +53,12 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: VideoParserViewModel by viewModels()
 
+    @Inject
+    lateinit var workManagerDownloadManager: WorkManagerDownloadManager
+
+    @Inject
+    lateinit var settingsManager: SettingsManager
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -52,7 +66,9 @@ class MainActivity : ComponentActivity() {
             TikHubVideoParserTheme {
                 MainScreen(
                     viewModel = viewModel,
-                    onCheckClipboard = { checkClipboard() }
+                    settingsManager = settingsManager,
+                    onCheckClipboard = { checkClipboard() },
+                    onDownload = { media -> handleDownload(media) }
                 )
             }
         }
@@ -62,6 +78,24 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // 自动检测剪贴板（可选，用户体验更好）
         checkClipboardOnResume()
+    }
+
+    /**
+     * 处理下载
+     */
+    private fun handleDownload(media: ParsedMedia) {
+        Timber.i("========== MainActivity 处理下载 ==========")
+
+        when (media) {
+            is ParsedMedia.Video -> {
+                viewModel.downloadVideo(media)
+                Toast.makeText(this, "开始下载视频", Toast.LENGTH_SHORT).show()
+            }
+            is ParsedMedia.ImageNote -> {
+                viewModel.downloadImages(media)
+                Toast.makeText(this, "开始下载 ${media.imageUrls.size} 张图片", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     /**
@@ -101,11 +135,33 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainScreen(
     viewModel: VideoParserViewModel,
-    onCheckClipboard: () -> String?
+    @Suppress("UNUSED_PARAMETER") settingsManager: SettingsManager,
+    onCheckClipboard: () -> String?,
+    onDownload: (ParsedMedia) -> Unit = {}
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val inputText by viewModel.inputText.collectAsStateWithLifecycle()
+    val downloadState by viewModel.downloadState.collectAsStateWithLifecycle()
+
+    var showSettingsScreen by remember { mutableStateOf(false) }
+    var showLogsScreen by remember { mutableStateOf(false) }
+
+    // 如果显示设置页面，则显示全屏设置页面
+    if (showSettingsScreen) {
+        SettingsScreen(
+            onBack = { showSettingsScreen = false }
+        )
+        return
+    }
+
+    // 如果显示日志页面，则显示全屏日志页面
+    if (showLogsScreen) {
+        LogsScreen(
+            onBack = { showLogsScreen = false }
+        )
+        return
+    }
 
     Scaffold(
         topBar = {
@@ -116,9 +172,20 @@ fun MainScreen(
                         fontWeight = FontWeight.Bold
                     )
                 },
+                actions = {
+                    // 日志按钮
+                    IconButton(onClick = { showLogsScreen = true }) {
+                        Icon(Icons.Default.Description, "查看日志")
+                    }
+                    // 设置按钮
+                    IconButton(onClick = { showSettingsScreen = true }) {
+                        Icon(Icons.Default.Settings, "设置")
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary
+                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
+                    actionIconContentColor = MaterialTheme.colorScheme.onPrimary
                 )
             )
         }
@@ -152,9 +219,9 @@ fun MainScreen(
             // 结果区域
             ResultSection(
                 uiState = uiState,
-                onDownload = { media ->
-                    handleDownload(context, media)
-                },
+                downloadState = downloadState,
+                onDownload = onDownload,
+                onResetDownloadState = { viewModel.resetDownloadState() },
                 onPlayVideo = { videoUrl ->
                     // TODO: 实现视频播放
                     Toast.makeText(context, "播放视频: $videoUrl", Toast.LENGTH_SHORT).show()
@@ -265,7 +332,9 @@ fun InputSection(
 @Composable
 fun ResultSection(
     uiState: VideoParserViewModel.UiState,
+    downloadState: DownloadState,
     onDownload: (ParsedMedia) -> Unit,
+    onResetDownloadState: () -> Unit,
     onPlayVideo: (String) -> Unit,
     onViewImage: (List<String>, Int) -> Unit
 ) {
@@ -281,10 +350,18 @@ fun ResultSection(
         is VideoParserViewModel.UiState.Success -> {
             // 成功：显示结果卡片
             MediaResultCard(
-                media = uiState.media,
+                media = uiState.result.media,
+                parseResultWrapper = uiState.result,
                 onPlayVideo = onPlayVideo,
                 onViewImage = onViewImage,
-                onDownload = { onDownload(uiState.media) }
+                onDownload = {
+                    // 如果已经下载成功，先重置状态再重新下载
+                    if (downloadState is DownloadState.Success) {
+                        onResetDownloadState()
+                    }
+                    onDownload(uiState.result.media)
+                },
+                downloadState = downloadState
             )
         }
         is VideoParserViewModel.UiState.Error -> {
@@ -377,32 +454,6 @@ fun ErrorState(message: String) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onErrorContainer
             )
-        }
-    }
-}
-
-/**
- * 处理下载
- */
-private fun handleDownload(context: Context, media: ParsedMedia) {
-    when (media) {
-        is ParsedMedia.Video -> {
-            DownloadHelper.downloadVideo(
-                context = context,
-                videoUrl = media.videoUrl,
-                fileName = "${media.platform}_${media.id}.mp4",
-                platform = media.platform
-            )
-            Toast.makeText(context, "开始下载视频", Toast.LENGTH_SHORT).show()
-        }
-        is ParsedMedia.ImageNote -> {
-            DownloadHelper.downloadImages(
-                context = context,
-                imageUrls = media.imageUrls,
-                filePrefix = "${media.platform}_${media.id}",
-                platform = media.platform
-            )
-            Toast.makeText(context, "开始下载 ${media.imageUrls.size} 张图片", Toast.LENGTH_SHORT).show()
         }
     }
 }

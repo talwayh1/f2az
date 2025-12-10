@@ -3,9 +3,11 @@ package com.tikhub.videoparser.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tikhub.videoparser.data.model.ParsedMedia
+import com.tikhub.videoparser.data.model.ParseResultWrapper
 import com.tikhub.videoparser.data.repository.VideoParserRepository
-import com.tikhub.videoparser.download.DownloadManager
 import com.tikhub.videoparser.download.DownloadState
+import com.tikhub.videoparser.download.DownloadWorker
+import com.tikhub.videoparser.download.WorkManagerDownloadManager
 import com.tikhub.videoparser.utils.Platform
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -19,7 +21,7 @@ import javax.inject.Inject
 sealed class UiState {
     object Idle : UiState() // 空闲状态
     object Loading : UiState() // 加载中
-    data class Success(val result: ParsedMedia) : UiState() // 解析成功
+    data class Success(val result: ParseResultWrapper) : UiState() // 解析成功
     data class Error(val message: String) : UiState() // 解析失败
 }
 
@@ -30,7 +32,8 @@ sealed class UiState {
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val repository: VideoParserRepository,
-    private val downloadManager: DownloadManager
+    private val workManagerDownloadManager: WorkManagerDownloadManager,
+    private val transcodeManager: com.tikhub.videoparser.download.WorkManagerTranscodeManager
 ) : ViewModel() {
 
     // UI 状态
@@ -65,8 +68,6 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 Timber.d("检查 SDK 服务状态...")
-                // 通过解析一个简单的测试来检查SDK是否可用
-                // 这里简化处理：假设repository初始化成功就表示SDK可用
                 _sdkStatus.value = true
                 Timber.i("✅ SDK 服务可用")
             } catch (e: Exception) {
@@ -100,7 +101,6 @@ class MainViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-                // 重置下载状态（修复：避免显示上一次的下载成功状态）
                 _downloadState.value = DownloadState.Idle
                 Timber.d("已重置下载状态为 Idle")
 
@@ -109,34 +109,33 @@ class MainViewModel @Inject constructor(
 
                 Timber.d("调用 Repository 解析...")
                 repository.parse(input)
-                    .onSuccess { result ->
+                    .onSuccess { resultWrapper ->
                         Timber.i("✅ 解析成功!")
-                        Timber.d("结果详情: $result")
+                        Timber.d("结果详情: ${resultWrapper.media::class.simpleName}")
+                        Timber.d("⏱️ 耗时: ${resultWrapper.getTimeDisplay()}")
+                        Timber.d("💰 费用: ${resultWrapper.getCostDisplay()}")
 
-                        // 保存平台信息，用于下载时设置 Referer
                         currentPlatform = Platform.detect(input)
                         Timber.d("识别平台: $currentPlatform")
 
                         // 如果是视频，获取真实文件大小
-                        val updatedResult = if (result is ParsedMedia.Video && result.videoUrl.isNotEmpty()) {
+                        val updatedResult = if (resultWrapper.media is ParsedMedia.Video && resultWrapper.media.videoUrl.isNotEmpty()) {
                             Timber.d("检测到视频，开始获取文件大小...")
-                            val fileSize = downloadManager.getFileSize(
-                                url = result.videoUrl,
+                            val fileSize = workManagerDownloadManager.getFileSize(
+                                url = resultWrapper.media.videoUrl,
                                 platform = currentPlatform
                             )
                             Timber.i("获取到视频文件大小: $fileSize 字节")
 
                             // 更新 video 的 fileSize 字段
-                            result.copy(fileSize = fileSize)
+                            val updatedMedia = resultWrapper.media.copy(fileSize = fileSize)
+                            resultWrapper.copy(media = updatedMedia)
                         } else {
-                            result
+                            resultWrapper
                         }
 
                         _uiState.value = UiState.Success(updatedResult)
-
-                        // 解析成功后清空输入框
                         _inputText.value = ""
-
                         Timber.i("========== 解析完成 ==========")
                     }
                     .onFailure { error ->
@@ -153,93 +152,124 @@ class MainViewModel @Inject constructor(
     }
 
     /**
-     * 下载视频
-     * @param videoUrl 无水印视频 URL
+     * 使用 WorkManager 下载视频（支持后台下载）
      */
-    fun downloadVideo(videoUrl: String) {
-        Timber.i("========== 开始下载视频 ==========")
-        Timber.i("视频 URL: $videoUrl")
-        Timber.i("平台: $currentPlatform")
+    fun downloadVideoWithWorkManager(media: ParsedMedia.Video) {
+        Timber.i("========== 使用 WorkManager 下载视频 ==========")
+        val videoUrl = media.videoUrl
 
-        viewModelScope.launch {
-            try {
-                downloadManager.downloadVideo(
-                    url = videoUrl,
-                    platform = currentPlatform
-                ).collect { state ->
-                    Timber.d("下载状态更新: $state")
-                    _downloadState.value = state
+        if (videoUrl.isBlank()) {
+            Timber.w("视频 URL 为空")
+            _downloadState.value = DownloadState.Failed("视频链接为空")
+            return
+        }
 
-                    when (state) {
-                        is DownloadState.Success -> {
-                            Timber.i("✅ 视频下载成功: ${state.filePath}")
+        val fileName = generateVideoFileName(media)
+        val workId = workManagerDownloadManager.downloadVideo(videoUrl, currentPlatform, fileName)
+
+        Timber.i("下载任务已提交: $workId")
+        _downloadState.value = DownloadState.Downloading(0)
+
+        // 观察下载进度
+        workManagerDownloadManager.getWorkInfo(workId).observeForever { workInfo ->
+            workInfo?.let { info ->
+                when {
+                    info.state.isFinished -> {
+                        if (info.state == androidx.work.WorkInfo.State.SUCCEEDED) {
+                            val filePath = info.outputData.getString("file_path") ?: "未知路径"
+                            _downloadState.value = DownloadState.Success(filePath)
+                            Timber.i("✅ 视频下载成功: $filePath")
+                        } else {
+                            _downloadState.value = DownloadState.Failed("下载失败")
+                            Timber.e("❌ 视频下载失败")
                         }
-                        is DownloadState.Failed -> {
-                            Timber.e("❌ 视频下载失败: ${state.error}")
-                        }
-                        else -> {}
+                    }
+                    info.state == androidx.work.WorkInfo.State.RUNNING -> {
+                        val progress = info.progress.getInt(DownloadWorker.KEY_PROGRESS, 0)
+                        _downloadState.value = DownloadState.Downloading(progress)
                     }
                 }
-            } catch (e: Exception) {
-                Timber.e(e, "❌ 下载视频过程发���异常")
-                _downloadState.value = DownloadState.Failed("下载出错: ${e.message}")
-            } finally {
-                Timber.i("========== 视频下载结束 ==========")
             }
         }
     }
 
     /**
-     * 下载单张图片
+     * 下载视频（简化版，通过 URL）
+     * 这是一个桥接方法，为了兼容旧的调用方式
      */
-    fun downloadImage(imageUrl: String) {
-        Timber.i("========== 开始下载图片 ==========")
-        Timber.i("图片 URL: $imageUrl")
+    fun downloadVideo(videoUrl: String) {
+        Timber.i("========== 使用 WorkManager 下载视频（简化版）==========")
+        Timber.i("视频 URL: $videoUrl")
 
-        viewModelScope.launch {
-            try {
-                downloadManager.downloadImage(
-                    url = imageUrl,
-                    platform = currentPlatform
-                ).collect { state ->
-                    Timber.d("下载状态更新: $state")
-                    _downloadState.value = state
+        if (videoUrl.isBlank()) {
+            Timber.w("视频 URL 为空")
+            _downloadState.value = DownloadState.Failed("视频链接为空")
+            return
+        }
+
+        // 生成简单的文件名
+        val fileName = "video_${System.currentTimeMillis()}.mp4"
+        val workId = workManagerDownloadManager.downloadVideo(videoUrl, currentPlatform, fileName)
+
+        Timber.i("下载任务已提交: $workId")
+        _downloadState.value = DownloadState.Downloading(0)
+
+        // 观察下载进度
+        workManagerDownloadManager.getWorkInfo(workId).observeForever { workInfo ->
+            workInfo?.let { info ->
+                when {
+                    info.state.isFinished -> {
+                        if (info.state == androidx.work.WorkInfo.State.SUCCEEDED) {
+                            val filePath = info.outputData.getString("file_path") ?: "未知路径"
+                            _downloadState.value = DownloadState.Success(filePath)
+                            Timber.i("✅ 视频下载成功: $filePath")
+                        } else {
+                            _downloadState.value = DownloadState.Failed("下载失败")
+                            Timber.e("❌ 视频下载失败")
+                        }
+                    }
+                    info.state == androidx.work.WorkInfo.State.RUNNING -> {
+                        val progress = info.progress.getInt(DownloadWorker.KEY_PROGRESS, 0)
+                        _downloadState.value = DownloadState.Downloading(progress)
+                    }
                 }
-            } catch (e: Exception) {
-                Timber.e(e, "❌ 下载图片过程发生异常")
-            } finally {
-                Timber.i("========== 图片下载结束 ==========")
             }
         }
+    }
+
+    /**
+     * 批量下载图片（使用 WorkManager）
+     */
+    fun downloadAllImagesWithWorkManager(imageUrls: List<String>) {
+        Timber.i("========== 使用 WorkManager 批量下载图片 ==========")
+        Timber.i("图片数量: ${imageUrls.size}")
+
+        if (imageUrls.isEmpty()) {
+            _downloadState.value = DownloadState.Failed("图片列表为空")
+            return
+        }
+
+        val workIds = workManagerDownloadManager.downloadImages(imageUrls, currentPlatform)
+        Timber.i("已提交 ${workIds.size} 个下载任务")
+        _downloadState.value = DownloadState.Downloading(0)
+
+        // TODO: 可以观察所有任务的进度
     }
 
     /**
      * 批量下载图片
      */
     fun downloadAllImages(imageUrls: List<String>) {
-        Timber.i("========== 开始批量下载图片 ==========")
-        Timber.i("图片数量: ${imageUrls.size}")
+        downloadAllImagesWithWorkManager(imageUrls)
+    }
 
-        viewModelScope.launch {
-            try {
-                imageUrls.forEachIndexed { index, url ->
-                    Timber.d("下载图片 ${index + 1}/${imageUrls.size}: $url")
-
-                    downloadManager.downloadImage(
-                        url = url,
-                        platform = currentPlatform,
-                        fileName = "image_${System.currentTimeMillis()}_$index"
-                    ).collect { state ->
-                        _downloadState.value = state
-                    }
-                }
-                Timber.i("✅ 批量下载完成")
-            } catch (e: Exception) {
-                Timber.e(e, "❌ 批量下载过程发生异常")
-            } finally {
-                Timber.i("========== 批量下载结束 ==========")
-            }
-        }
+    /**
+     * 生成视频文件名
+     */
+    private fun generateVideoFileName(media: ParsedMedia.Video): String {
+        val title = media.title.take(30).replace(Regex("[^a-zA-Z0-9\\u4e00-\\u9fa5]"), "_")
+        val timestamp = System.currentTimeMillis()
+        return "${title}_$timestamp.mp4"
     }
 
     /**
@@ -254,16 +284,42 @@ class MainViewModel @Inject constructor(
 
     /**
      * 处理剪贴板内容
-     * @param clipboardText 剪贴板文本
-     * @param autoFill 是否自动填充到输入框
      */
     fun handleClipboard(clipboardText: String, autoFill: Boolean = true) {
         Timber.d("处理剪贴板内容: ${clipboardText.take(50)}...")
-        Timber.d("自动填充: $autoFill")
 
         if (autoFill && clipboardText.isNotBlank()) {
             _inputText.value = clipboardText
             Timber.i("剪贴板内容已自动填充")
+        }
+    }
+
+    /**
+     * 转码视频（ByteVC2 -> H.264）
+     */
+    fun transcodeVideo(filePath: String, videoTitle: String = "视频") {
+        Timber.i("========== 开始转码视频 ==========")
+        Timber.i("输入文件: $filePath")
+        Timber.i("视频标题: $videoTitle")
+
+        viewModelScope.launch {
+            try {
+                val workId = transcodeManager.startTranscode(
+                    inputFilePath = filePath,
+                    videoTitle = videoTitle,
+                    codecType = "ByteVC2"
+                )
+
+                Timber.i("✅ 转码任务已启动: $workId")
+                Timber.i("转码将在后台进行，请查看通知栏获取进度")
+
+                // 可以选择观察转码进度
+                transcodeManager.getTranscodeProgress(workId).collect { progress ->
+                    Timber.d("转码进度: $progress%")
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "❌ 启动转码任务失败")
+            }
         }
     }
 

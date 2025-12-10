@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.tikhub.videoparser.network.LogServerManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -22,7 +23,8 @@ import javax.inject.Inject
  */
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
-    application: Application
+    application: Application,
+    private val logServerManager: LogServerManager
 ) : AndroidViewModel(application) {
 
     companion object {
@@ -58,6 +60,10 @@ class SettingsViewModel @Inject constructor(
     // 保存成功状态
     private val _saveSuccess = MutableStateFlow(false)
     val saveSuccess: StateFlow<Boolean> = _saveSuccess
+
+    // 日志服务器状态
+    val logServerRunning: StateFlow<Boolean> = logServerManager.isRunning
+    val logServerUrl: StateFlow<String?> = logServerManager.serverUrl
 
     init {
         loadSettings()
@@ -150,7 +156,33 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
-     * 删除/重置 API Key 到默认值
+     * 清空 API Key 和 Base URL
+     */
+    fun clearApiKey() {
+        viewModelScope.launch {
+            try {
+                dataStore.edit { preferences ->
+                    preferences.remove(API_KEY)
+                    preferences.remove(BASE_URL)
+                }
+
+                _apiKey.value = ""
+                _baseUrl.value = ""
+                _saveSuccess.value = true
+
+                Timber.i("✅ API 配置已清空")
+
+                // 3秒后重置成功状态
+                kotlinx.coroutines.delay(3000)
+                _saveSuccess.value = false
+            } catch (e: Exception) {
+                Timber.e(e, "清空 API 配置失败")
+            }
+        }
+    }
+
+    /**
+     * 重置 API Key 到默认值
      */
     fun resetApiKey() {
         viewModelScope.launch {
@@ -191,5 +223,35 @@ class SettingsViewModel @Inject constructor(
                 Timber.e(e, "切换日志自动刷新失败")
             }
         }
+    }
+
+    /**
+     * 启动日志服务器
+     */
+    fun startLogServer(port: Int = 8080) {
+        viewModelScope.launch {
+            val result = logServerManager.startServer(port)
+            result.onSuccess { url ->
+                Timber.i("日志服务器已启动: $url")
+            }.onFailure { error ->
+                Timber.e(error, "启动日志服务器失败")
+            }
+        }
+    }
+
+    /**
+     * 停止日志服务器
+     */
+    fun stopLogServer() {
+        viewModelScope.launch {
+            logServerManager.stopServer()
+        }
+    }
+
+    /**
+     * 获取所有IP地址
+     */
+    fun getAllIpAddresses(): List<String> {
+        return logServerManager.getAllIpAddresses()
     }
 }

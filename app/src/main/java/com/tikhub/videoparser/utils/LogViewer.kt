@@ -198,8 +198,7 @@ fun LogViewer(
     val isRecording by logManager.isRecording.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
-    val context = LocalContext.current
-
+    
     var showExportDialog by remember { mutableStateOf(false) }
     var exportPath by remember { mutableStateOf("") }
 

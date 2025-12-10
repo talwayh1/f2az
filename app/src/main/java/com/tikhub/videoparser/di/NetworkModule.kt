@@ -13,6 +13,7 @@ import dagger.hilt.components.SingletonComponent
 import okhttp3.Cache
 import okhttp3.CacheControl
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -91,12 +92,44 @@ object NetworkModule {
             chain.proceed(requestWithUserAgent)
         }
 
+        // 重试拦截器：自动重试失败的请求（最多3次）
+        val retryInterceptor = okhttp3.Interceptor { chain ->
+            val request = chain.request()
+            var response: okhttp3.Response? = null
+            var tryCount = 0
+            val maxRetries = 3
+
+            while (tryCount < maxRetries) {
+                try {
+                    response = chain.proceed(request)
+                    if (response.isSuccessful) {
+                        return@Interceptor response
+                    }
+                    response.close()
+                } catch (e: Exception) {
+                    Timber.w("请求失败 (尝试 ${tryCount + 1}/$maxRetries): ${e.message}")
+                    if (tryCount >= maxRetries - 1) {
+                        throw e
+                    }
+                }
+                tryCount++
+                // 指数退避：第1次等待1秒，第2次等待2秒
+                if (tryCount < maxRetries) {
+                    Thread.sleep((tryCount * 1000).toLong())
+                }
+            }
+
+            response ?: throw java.io.IOException("请求失败，已重试 $maxRetries 次")
+        }
+
         return OkHttpClient.Builder()
             .connectTimeout(ApiConstants.Timeout.CONNECT, TimeUnit.SECONDS)
             .readTimeout(ApiConstants.Timeout.READ, TimeUnit.SECONDS)
             .writeTimeout(ApiConstants.Timeout.WRITE, TimeUnit.SECONDS)
+            .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))  // 启用 HTTP/2 支持
             .cache(cache)
-            .addInterceptor(userAgentInterceptor) // User-Agent (第一个，优先级最高)
+            .addInterceptor(retryInterceptor) // 重试拦截器（最优先）
+            .addInterceptor(userAgentInterceptor) // User-Agent
             .addInterceptor(offlineCacheInterceptor) // 离线缓存
             .addNetworkInterceptor(cacheInterceptor) // 在线缓存
             .addInterceptor(loggingInterceptor)
@@ -183,7 +216,7 @@ object NetworkModule {
                     }
                     return `in`.nextString() as T
                 }
-            } as com.google.gson.TypeAdapter<T>
+            }
         }
     }
 }

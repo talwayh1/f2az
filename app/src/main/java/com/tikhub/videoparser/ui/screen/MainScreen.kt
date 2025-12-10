@@ -36,7 +36,7 @@ fun MainScreen(
     val uiState by viewModel.uiState.collectAsState()
     val inputText by viewModel.inputText.collectAsState()
     val sdkStatus by viewModel.sdkStatus.collectAsState()
-    val downloadState by viewModel.downloadState.collectAsState()
+    val downloadState by viewModel.downloadState.collectAsState()  // 🎯 新增：下载状态
     val clipboardManager = LocalClipboardManager.current
 
     Scaffold(
@@ -151,12 +151,62 @@ fun MainScreen(
                 }
 
                 is UiState.Success -> {
+                    // 显示耗时和费用信息
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // 耗时信息
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = state.result.getPerformanceLevel().emoji,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Text(
+                                    text = "耗时: ${state.result.getTimeDisplay()}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                                )
+                            }
+
+                            // 费用信息
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = "💰",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Text(
+                                    text = "费用: ${state.result.getCostDisplay()}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
                     MediaResultCard(
-                        media = state.result,
+                        media = state.result.media,
                         onPlayVideo = { /* TODO: Implement video playback */ },
-                        onViewImage = { urls, index -> /* TODO: Implement image viewer */ },
+                        onViewImage = { _, _ -> /* TODO: Implement image viewer */ },
                         onDownload = {
-                            when (val media = state.result) {
+                            when (val media = state.result.media) {
                                 is com.tikhub.videoparser.data.model.ParsedMedia.Video -> {
                                     viewModel.downloadVideo(media.videoUrl)
                                 }
@@ -164,7 +214,17 @@ fun MainScreen(
                                     viewModel.downloadAllImages(media.imageUrls)
                                 }
                             }
-                        }
+                        },
+                        onTranscode = { filePath ->
+                            // 🎯 转码回调
+                            val videoTitle = when (val media = state.result.media) {
+                                is com.tikhub.videoparser.data.model.ParsedMedia.Video -> media.title
+                                else -> "视频"
+                            }
+                            viewModel.transcodeVideo(filePath, videoTitle)
+                        },
+                        downloadState = downloadState,
+                        downloadedFilePath = (downloadState as? com.tikhub.videoparser.download.DownloadState.Success)?.filePath
                     )
                 }
 

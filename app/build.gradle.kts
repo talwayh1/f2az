@@ -1,3 +1,7 @@
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -13,8 +17,15 @@ android {
         applicationId = "com.tikhub.videoparser"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+
+        // 自动生成版本号：基于时间戳，确保每次编译都是唯一的
+        val timestamp = SimpleDateFormat("yyyyMMddHHmmss", Locale.US).format(Date())
+        val buildNumber = timestamp.toLong() % 2000000000  // 转换为整数作为 versionCode
+        versionCode = buildNumber.toInt()
+
+        // 开发版本号：包含日期时间和功能描述，便于追踪
+        val readableTimestamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+        versionName = "1.0.0-xiaohongshu-fix-v3-$readableTimestamp"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -115,6 +126,9 @@ dependencies {
     // DataStore (替代 SharedPreferences)
     implementation("androidx.datastore:datastore-preferences:1.0.0")
 
+    // Security Crypto (加密 SharedPreferences)
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
     // 权限请求库 (Accompanist)
     implementation("com.google.accompanist:accompanist-permissions:0.32.0")
 
@@ -123,6 +137,22 @@ dependencies {
 
     // Logger 日志库（漂亮的格式化日志输出）
     implementation("com.orhanobut:logger:2.2.0")
+
+    // WorkManager 用于后台下载任务
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
+
+    // Hilt WorkManager 集成
+    implementation("androidx.hilt:hilt-work:1.1.0")
+    kapt("androidx.hilt:hilt-compiler:1.1.0")
+
+    // FFmpeg-kit 视频转码库（支持 ByteVC2 转码）
+    // 注意：FFmpeg-kit 库体积较大（约 50MB），会显著增加 APK 大小
+    // mobile-ffmpeg 已废弃，改用 ffmpeg-kit
+    // 暂时注释以便编译小红书修复版本
+    // implementation("com.arthenica:ffmpeg-kit-full:6.0.LTS")
+
+    // NanoHTTPD 轻量级HTTP服务器（用于远程日志查看）
+    implementation("org.nanohttpd:nanohttpd:2.3.1")
 
     // 测试依赖
     testImplementation("junit:junit:4.13.2")
